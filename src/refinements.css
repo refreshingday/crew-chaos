@@ -1,0 +1,16 @@
+/* Keep instructions beside the playable deck, including narrow phone views. */
+.tutorial,.touch-mode .tutorial{left:3%;bottom:145px;transform:none;max-width:270px;padding:12px 16px}
+.tutorial strong{font-size:9px;line-height:1.5;letter-spacing:.8px}
+.tutorial div>span{font-size:10px;line-height:1.5}
+@media (max-width:650px) and (orientation:portrait){
+  .crew-hud{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));left:4%;right:4%;gap:5px}
+  .crew-chip strong{max-width:110px}
+  .wave-warning{top:275px}
+  .game-toast{top:335px}
+  .tutorial,.touch-mode .tutorial{left:50%;top:270px;bottom:auto;transform:translateX(-50%);width:90%;max-width:none;padding:10px 13px}
+  .tutorial strong{font-size:8px}.tutorial div>span{font-size:9px}
+}
+@media (orientation:landscape) and (max-height:550px){
+  .tutorial,.touch-mode .tutorial{left:3%;bottom:140px;max-width:210px;padding:8px 11px}
+  .tutorial strong{font-size:7px}.tutorial div>span{font-size:8px}
+}

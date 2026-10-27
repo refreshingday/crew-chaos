@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.sites-local/
+.sites-state/
+*.log
+*.tar.gz
+test-results/
