@@ -1,4 +1,5 @@
 // Authoritative, renderer-independent simulation. The host alone advances this state.
+import { ADDONS, ADDON_IDS } from './addons.js';
 const DECK_Y = 1.8;
 const DECK_X = 3.65;
 const DECK_Z = 2.35;
@@ -25,12 +26,16 @@ export class Game {
     this.collisionCooldown = 0;
     this.lastInteract = {};
     this.finale = false;
+    this.chunkCount = 0;
+    this.addonBag = [];
     const members = roster.slice(0, 4);
     if (!members.length) members.push({ id: 'host', name: 'Captain' });
     this.state = {
       phase: 'playing', time: 0, duration: clamp(Number(duration) || 180, 30, 240), seed,
       difficulty, hull: 100, score: 0, buoys: 2, storm: 0, wipeTime: 0,
-      boat: { x: 0, z: 0, vx: 0, roll: 0, steer: 0, speed: 10.5 },
+      boat: { x: 0, z: 0, vx: 0, roll: 0, steer: 0, trim: 0, speed: 10,
+        targetSpeed: 10, speedTier: 0, effects: { ghost: 0, magnet: 0, disco: 0, octopus: 0, thunder: 0 } },
+      pace: { tier: 0, baseSpeed: 10, nextAt: clamp(Number(duration) || 180, 30, 240) / 9 },
       players: members.map((p, i) => ({
         id: String(p.id), name: String(p.name || `Sailor ${i + 1}`).slice(0, 18), color: p.color || COLORS[i],
         x: (i - (members.length - 1) / 2) * 1.35, z: i % 2 ? -.55 : .55, y: DECK_Y,
@@ -38,9 +43,10 @@ export class Game {
         shield: 0, boost: 0, anchor: 0, invulnerable: 1, swimTime: 0,
         swimElapsed: 0, rescueProgress: 0, rescueTarget: null, rescuer: null,
         automaticRescue: false, ping: 0,
+        effects: Object.fromEntries(ADDON_IDS.map(id => [id, 0])), jellyBounced: false,
       })),
-      obstacles: [], waves: [], events: [],
-      stats: { rescues: 0, crates: 0, treasure: 0, falls: 0, perfectBraces: 0 },
+      obstacles: [], waves: [], events: [], impacts: [],
+      stats: { rescues: 0, crates: 0, treasure: 0, falls: 0, perfectBraces: 0, waveDodges: 0 },
     };
     this.event('All aboard! Move across the deck to steer.', 'tip');
     this.spawnSupply(0, 42, 'treasure');
@@ -71,16 +77,36 @@ export class Game {
     this.state.obstacles.push({ id: this.nextId++, type, x, z, radius: 1, active: true });
   }
 
+  nextAddon() {
+    if (!this.addonBag.length) {
+      this.addonBag = [...ADDON_IDS];
+      for (let i = this.addonBag.length - 1; i > 0; i--) {
+        const j = Math.floor(this.random() * (i + 1));
+        [this.addonBag[i], this.addonBag[j]] = [this.addonBag[j], this.addonBag[i]];
+      }
+    }
+    return this.addonBag.pop();
+  }
+
+  impact(kind, x, z, damage = 0, blocked = false) {
+    this.state.impacts.push({ id: this.nextId++, x, z, at: this.state.time, damage, kind, blocked });
+    this.state.impacts = this.state.impacts.slice(-16);
+  }
+
   spawnChunk() {
     const s = this.state;
     const progress = s.time / s.duration;
     const gentle = s.difficulty === 'relaxed';
-    const safeLane = [-12, -6, 0, 6, 12][Math.floor(this.random() * 5)];
-    const z = s.boat.z + 95 + this.random() * 20;
+    this.chunkCount++;
+    // Encounters follow the current course across the unlimited ocean. A short
+    // velocity prediction makes continued sideways sailing encounter new hazards.
+    const routeX = s.boat.x + clamp(s.boat.vx, -7.8, 7.8) * 4;
+    const safeLane = routeX + [-12, -6, 0, 6, 12][Math.floor(this.random() * 5)];
+    const z = s.boat.z + s.boat.speed * (6.6 + this.random() * .8);
     const first = s.time < 15;
     const recovery = s.time > s.duration * .5 && s.time < s.duration * .59;
     const hazardCount = first || recovery ? 1 : gentle ? 2 : progress > .6 ? 3 : 2;
-    const candidates = [-15, -7.5, 0, 7.5, 15].filter(x => Math.abs(x - safeLane) > 6.5);
+    const candidates = [-15, -7.5, 0, 7.5, 15].map(x => x + routeX).filter(x => Math.abs(x - safeLane) > 6.5);
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = Math.floor(this.random() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
@@ -95,20 +121,27 @@ export class Game {
         radius, active: true, variant: Math.floor(this.random() * 3),
       });
     }
-    const supply = recovery || s.hull < 50 ? 'supply' : this.random() < .4 ? 'snack' : 'treasure';
+    const supply = recovery || s.hull < 50 ? 'supply' : 'treasure';
     this.spawnSupply(safeLane, z + 3, supply);
-    if (supply === 'snack') s.obstacles.at(-1).snack = ['bubble', 'chili', 'anchor'][Math.floor(this.random() * 3)];
-    this.nextChunk = s.time + (recovery ? 8.5 : gentle ? 8 : progress > .7 ? 5.6 : 6.8);
+    // Separate food from repairs/treasure so useful recovery never removes all
+    // add-on opportunities. The shuffled bag visits all twelve before repeating.
+    if (this.chunkCount % 2 === 1 || recovery) {
+      this.spawnSupply(safeLane, z - 8, 'snack');
+      s.obstacles.at(-1).snack = this.nextAddon();
+    }
+    this.nextChunk = s.time + (recovery ? 7 : gentle ? 7 : progress > .7 ? 4.8 : 6.2);
   }
 
   spawnWave() {
     const s = this.state;
-    const side = s.time < 15 ? 0 : [-1, 0, 1][Math.floor(this.random() * 3)];
-    const warning = s.difficulty === 'relaxed' ? 3.8 : 3;
-    s.waves.push({ id: this.nextId++, z: s.boat.z + s.boat.speed * warning, side,
-      hit: false, kind: side === 0 ? 'breaker' : 'side', strength: s.difficulty === 'relaxed' ? .8 : 1,
+    const warning = s.difficulty === 'relaxed' ? 4.6 : 3.8 + this.random() * .5;
+    const speed = 7 + this.random() * 3;
+    s.waves.push({ id: this.nextId++, x: s.boat.x + clamp(s.boat.vx, -7.8, 7.8) * 2 + (this.random() - .5) * 10,
+      z: s.boat.z + (s.boat.speed + speed) * warning, width: 10 + this.random() * 8,
+      speed, hit: false, passed: false, dodged: false, kind: 'breaker', side: 0,
+      strength: s.difficulty === 'relaxed' ? .8 : 1, at: s.time,
     });
-    this.event(side === 0 ? 'WAVE AHEAD — hold BRACE!' : `WAVE FROM ${side < 0 ? 'RIGHT' : 'LEFT'} — hold BRACE!`, 'wave');
+    this.event('BIG WAVE APPROACHING — steer around it or hold BRACE!', 'wave');
     const recovery = s.time > s.duration * .5 && s.time < s.duration * .59;
     this.nextWave = s.time + (recovery ? 17 : s.time > s.duration * .72 ? 10 : 14) + this.random() * 4;
   }
@@ -130,6 +163,11 @@ export class Game {
     s.time += dt;
     this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
     s.storm = clamp(s.time / s.duration, 0, 1);
+    for (const key of Object.keys(s.boat.effects)) s.boat.effects[key] = Math.max(0, s.boat.effects[key] - dt);
+    const tier = Math.min(8, Math.floor(s.time / (s.duration / 9)));
+    if (tier > s.boat.speedTier) this.event(`TIDE RISING! Speed level ${tier + 1} — move aft to slow down.`, 'pace');
+    s.boat.speedTier = tier;
+    s.pace = { tier, baseSpeed: 10 + tier * 1.25, nextAt: tier < 8 ? (tier + 1) * s.duration / 9 : null };
     if (s.time >= this.nextChunk && s.time < s.duration - 7) this.spawnChunk();
     if (s.time >= this.nextWave && s.time < s.duration - 4) this.spawnWave();
     if (!this.finale && s.time > s.duration - 30) {
@@ -147,22 +185,35 @@ export class Game {
     }
     this.updateRescues(inputs, dt);
 
-    const steer = s.players.reduce((sum, p) => sum + (p.state === 'deck' ? p.x / DECK_X : 0), 0) / Math.max(1, s.players.length);
+    const steer = s.players.reduce((sum, p) => sum + (p.state === 'deck' ? p.x / DECK_X * (p.effects.giant > 0 ? 1.7 : 1) : 0), 0) / Math.max(1, s.players.length);
+    s.boat.trim = s.players.reduce((sum, p) => sum + (p.state === 'deck' ? p.z / DECK_Z : 0), 0) / Math.max(1, s.players.length);
+    s.boat.targetSpeed = clamp(s.pace.baseSpeed + s.boat.trim * 3.5, 6.5, 22);
+    s.boat.speed = approach(s.boat.speed, s.boat.targetSpeed, 1.25, dt);
     s.boat.steer = approach(s.boat.steer, Math.abs(steer) < .065 ? 0 : steer, 7, dt);
     s.boat.vx = approach(s.boat.vx, s.boat.steer * 7.8, 3, dt);
-    s.boat.x = clamp(s.boat.x + s.boat.vx * dt, -18, 18);
-    if (Math.abs(s.boat.x) >= 18) s.boat.vx *= .85;
+    s.boat.x += s.boat.vx * dt;
     s.boat.roll = approach(s.boat.roll, -s.boat.steer * .115, 5, dt);
     s.boat.z += s.boat.speed * dt;
 
     for (const wave of s.waves) {
-      if (!wave.hit && wave.z <= s.boat.z + 1.1) {
-        wave.hit = true;
-        this.hitWave(wave);
+      wave.z -= (Number(wave.speed) || 0) * dt;
+      if (!wave.passed && !wave.hit && wave.z <= s.boat.z + 1.1) {
+        wave.passed = true;
+        const x = Number.isFinite(wave.x) ? wave.x : s.boat.x;
+        const width = Number.isFinite(wave.width) ? wave.width : 14;
+        if (Math.abs(s.boat.x - x) <= width / 2 + 2.8) {
+          wave.hit = true;
+          this.hitWave(wave);
+        } else {
+          wave.dodged = true;
+          s.stats.waveDodges++;
+          s.score += 25;
+          this.event('Clean wave dodge! +25', 'good');
+        }
       }
     }
     this.updateObstacles();
-    s.obstacles = s.obstacles.filter(o => o.z > s.boat.z - 32);
+    s.obstacles = s.obstacles.filter(o => o.z > s.boat.z - 32 && Math.abs(o.x - s.boat.x) < 220);
     s.waves = s.waves.filter(w => w.z > s.boat.z - 35);
 
     const active = s.players.some(p => p.state === 'deck' || p.state === 'air');
@@ -182,6 +233,7 @@ export class Game {
   movePlayer(p, input, dt) {
     const s = this.state;
     for (const key of ['shield', 'boost', 'anchor', 'invulnerable', 'ping']) p[key] = Math.max(0, p[key] - dt);
+    for (const key of ADDON_IDS) p.effects[key] = Math.max(0, p.effects[key] - dt);
     p.brace = input.brace && p.state === 'deck';
     if (input.ping && p.ping <= 0) p.ping = 2.5;
     const magnitude = Math.hypot(input.x, input.z);
@@ -189,23 +241,30 @@ export class Game {
     const dz = magnitude > 1 ? input.z / magnitude : input.z;
 
     if (p.state === 'deck') {
-      const speed = (p.boost > 0 ? 6.7 : 4.8) * (p.brace ? .35 : 1) * (p.anchor > 0 ? .7 : 1);
-      p.vx = approach(p.vx, dx * speed, 18, dt);
-      p.vz = approach(p.vz, dz * speed, 18, dt);
+      const speed = (p.boost > 0 ? 6.7 : p.effects.banana > 0 ? 5.6 : 4.8) * (p.brace ? .35 : 1) * (p.anchor > 0 ? .7 : 1) * (p.effects.giant > 0 ? .65 : 1);
+      const acceleration = p.effects.banana > 0 ? 2.4 : 18;
+      p.vx = approach(p.vx, dx * speed, acceleration, dt);
+      p.vz = approach(p.vz, dz * speed, acceleration, dt);
       p.x = clamp(p.x + p.vx * dt, -DECK_X, DECK_X);
       p.z = clamp(p.z + p.vz * dt, -DECK_Z, DECK_Z);
       p.y = DECK_Y;
     } else if (p.state === 'air') {
-      p.vx += dx * 4.5 * dt;
-      p.vz += dz * 4.5 * dt;
+      const correction = p.effects.jelly > 0 ? 10.8 : 4.5;
+      p.vx += dx * correction * dt;
+      p.vz += dz * correction * dt;
       p.x += p.vx * dt;
       p.z += p.vz * dt;
-      p.vy -= 17 * dt;
+      p.vy -= (p.effects.balloon > 0 ? 7.65 : 17) * dt;
       p.y += p.vy * dt;
-      if (p.vy < 0 && p.y <= DECK_Y && Math.abs(p.x) < DECK_X + .3 && Math.abs(p.z) < DECK_Z + .3) {
-        p.state = 'deck'; p.y = DECK_Y; p.vy = 0;
+      const catchMargin = p.effects.jelly > 0 ? 1 : .3;
+      if (p.vy < 0 && p.y <= DECK_Y && Math.abs(p.x) < DECK_X + catchMargin && Math.abs(p.z) < DECK_Z + catchMargin) {
+        p.y = DECK_Y;
         p.x = clamp(p.x, -DECK_X, DECK_X); p.z = clamp(p.z, -DECK_Z, DECK_Z);
-        p.vx *= .2; p.vz *= .2;
+        if (p.effects.jelly > 0 && !p.jellyBounced) {
+          p.jellyBounced = true; p.vy = 2.8; p.vx *= .05; p.vz *= .05;
+        } else {
+          p.state = 'deck'; p.vy = 0; p.vx *= .2; p.vz *= .2;
+        }
       } else if (p.y <= .25) this.fallOverboard(p);
     } else if (p.state === 'swim') {
       p.swimElapsed += dt;
@@ -243,6 +302,11 @@ export class Game {
     const s = this.state;
     let protectedCount = 0;
     let flying = 0;
+    if (s.boat.effects.octopus > 0) {
+      this.event('Octopus arms held the whole boat steady!', 'good');
+      s.score += 20;
+      return;
+    }
     for (const p of s.players) {
       if (p.state !== 'deck' || p.invulnerable > 0) continue;
       if (p.brace || p.anchor > 0) {
@@ -251,9 +315,11 @@ export class Game {
         continue;
       }
       p.state = 'air';
-      p.vy = 7.8 * wave.strength;
-      p.vx = wave.side ? wave.side * 4.7 * wave.strength : p.x * .38;
-      p.vz = wave.side ? -.55 : -4.6 * wave.strength;
+      const strength = Number(wave.strength) || 1;
+      p.vy = 7.8 * strength;
+      p.vx = wave.side ? wave.side * 4.7 * strength : p.x * .38;
+      p.vz = wave.side ? -.55 : -4.6 * strength;
+      p.jellyBounced = false;
       p.brace = false;
       flying++;
     }
@@ -266,6 +332,7 @@ export class Game {
   fallOverboard(p) {
     if (p.shield > 0) {
       p.shield = 0;
+      p.effects.bubble = 0;
       p.state = 'deck'; p.y = DECK_Y;
       p.x = clamp(p.x, -2.5, 2.5); p.z = clamp(p.z, -1.5, 1.5);
       p.vx = p.vz = p.vy = 0; p.invulnerable = 1;
@@ -328,27 +395,57 @@ export class Game {
 
   useSnack(p) {
     const snack = p.snack;
+    if (!ADDONS[snack]) return;
     p.snack = null;
-    if (snack === 'bubble') { p.shield = 30; this.event(`${p.name} ate Bubble Fruit. Next fall is covered!`, 'good'); }
-    else if (snack === 'chili') { p.boost = 8; this.event(`${p.name} ate Chili Noodles. Speedy feet!`, 'good'); }
-    else { p.anchor = 8; this.event(`${p.name} ate Anchor Biscuit. Wave-proof for 8s!`, 'good'); }
+    const s = this.state;
+    const duration = ADDONS[snack].duration;
+    p.effects[snack] = duration;
+    if (snack === 'bubble') p.shield = duration;
+    else if (snack === 'chili') p.boost = duration;
+    else if (snack === 'anchor') p.anchor = duration;
+    else if (['magnet', 'ghost', 'disco'].includes(snack)) s.boat.effects[snack] = Math.max(s.boat.effects[snack], duration);
+    else if (snack === 'thunder') {
+      s.boat.effects.thunder = duration;
+      let cleared = 0;
+      for (const obstacle of s.obstacles) {
+        if (obstacle.active && !['treasure', 'snack', 'supply'].includes(obstacle.type)
+          && Math.hypot(obstacle.x - s.boat.x, obstacle.z - s.boat.z) < 28) {
+          obstacle.active = false; cleared++;
+        }
+      }
+      s.score += cleared * 25;
+      this.impact('thunder', s.boat.x, s.boat.z, 0, false);
+      this.event(`THUNDER POP! ${cleared} hazards cleared.`, 'good');
+    } else if (snack === 'octopus') {
+      const swimmers = s.players.filter(other => ['swim', 'rescue'].includes(other.state));
+      if (swimmers.length) {
+        for (const swimmer of swimmers) this.finishRescue(swimmer, true);
+        s.score += swimmers.length * 30;
+        this.event(`Octopus grapple! ${swimmers.length} sailors saved.`, 'rescue');
+      } else s.boat.effects.octopus = duration;
+    }
+    if (!['thunder', 'octopus'].includes(snack)) this.event(`${p.name} ate ${ADDONS[snack].name}!`, 'good');
+    else if (snack === 'octopus' && s.boat.effects.octopus > 0) this.event('Octopus arms are guarding the boat from waves!', 'good');
   }
 
   updateObstacles() {
     const s = this.state;
     for (const o of s.obstacles) {
       if (!o.active) continue;
+      const collectible = ['supply', 'snack', 'treasure'].includes(o.type);
+      const reach = collectible && s.boat.effects.magnet > 0 ? 8 : 3.4;
       const dz = Math.abs(o.z - s.boat.z);
-      if (dz > 3.4 + o.radius) continue;
+      if (dz > reach + o.radius) continue;
       const dx = Math.abs(o.x - s.boat.x);
-      if (dx > 3.4 + o.radius) continue;
-      if (['supply', 'snack', 'treasure'].includes(o.type)) {
+      if (dx > reach + o.radius) continue;
+      if (collectible) {
         if (o.type === 'supply') {
           s.hull = Math.min(100, s.hull + 18);
           this.event('Repair supplies! +18 hull', 'good');
         } else if (o.type === 'treasure') {
-          s.score += 100; s.stats.treasure++;
-          this.event('Treasure aboard! +100', 'good');
+          const points = Math.round(100 * (s.boat.effects.disco > 0 ? 2 : 1) * (s.players.some(p => p.effects.banana > 0) ? 1.25 : 1));
+          s.score += points; s.stats.treasure++;
+          this.event(`Treasure aboard! +${points}`, 'good');
         } else {
           const p = s.players.filter(p => p.state === 'deck' && !p.snack)
             .sort((a, b) => Math.abs(a.x - (o.x - s.boat.x)) - Math.abs(b.x - (o.x - s.boat.x)))[0];
@@ -358,11 +455,28 @@ export class Game {
         }
         o.active = false;
       } else if (this.collisionCooldown <= 0) {
+        if (s.boat.effects.ghost > 0) {
+          o.active = false;
+          this.impact(o.type, o.x, o.z, 0, true);
+          this.event('Ghost Grape! Phased through the obstacle.', 'good');
+          continue;
+        }
         const damage = { crate: 6, wreck: 15, whale: 12, reef: 9 }[o.type] || 8;
         s.hull = Math.max(0, s.hull - damage);
         this.collisionCooldown = 1.3;
         o.active = false;
+        this.impact(o.type, o.x, o.z, damage, false);
         s.boat.vx += (s.boat.x >= o.x ? 1 : -1) * 2;
+        for (const p of s.players) {
+          if (p.state !== 'deck') continue;
+          // A collision visibly jolts everyone, even a braced sailor. Keep its
+          // horizontal impulse small so a single bump is usually recoverable.
+          const braced = p.brace || p.anchor > 0;
+          p.state = 'air'; p.vy = braced ? 2.7 : 4.8;
+          p.vx = braced ? 0 : (s.boat.x >= o.x ? 1 : -1) * .8;
+          p.vz = braced ? 0 : -.7;
+          p.jellyBounced = false; p.brace = false;
+        }
         if (o.type === 'crate') s.stats.crates++;
         this.event(o.type === 'whale' ? `Whale bump! −${damage} hull` : `Watch the ${o.type}! −${damage} hull`, 'damage');
       }

@@ -1,12 +1,71 @@
 // Room reservation and host-star topology adapted from refreshingday/multiplayerTest:
 // room-v23.js, network-v23.js, and puff-river/room.js (inspected 27 Oct 2026).
 // PeerJS Cloud provides signaling only. No dedicated gameplay server is used.
-const PREFIX = 'crew-chaos-web-v1-';
-const PROTOCOL = 1;
+const PREFIX = 'crew-chaos-web-v2-';
+export const NETWORK_PROTOCOL = 2;
+const PROTOCOL = NETWORK_PROTOCOL;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const COLORS = ['#ffb34d', '#56ded0', '#bd9cff', '#ff82aa'];
 const MAX_PACKET = 60_000;
+const encoder = new TextEncoder();
 const emptyInput = () => ({ x: 0, z: 0, brace: false, interact: false, ping: false });
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+  (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+const finiteFields = (value, keys) => record(value) && keys.every(key => Number.isFinite(value[key]));
+const entityId = value => Number.isSafeInteger(value) && value >= 0;
+const text = (value, length = 64) => typeof value === 'string' && value.length <= length;
+const effectKeys = new Set(['bubble', 'chili', 'anchor', 'jelly', 'magnet', 'ghost', 'balloon', 'disco', 'banana', 'thunder', 'giant', 'octopus']);
+
+function validEffects(value) {
+  return record(value) && Object.entries(value).every(([key, timer]) => effectKeys.has(key) && Number.isFinite(timer) && timer >= 0);
+}
+
+/** Keep malformed host data out of the renderer while allowing an open ocean and changing speeds. */
+export function validSnapshot(state) {
+  try {
+    if (!record(state) || !['playing', 'won', 'lost', 'paused'].includes(state.phase)) return false;
+    if (!finiteFields(state, ['time', 'duration', 'hull', 'score', 'buoys', 'storm'])) return false;
+    if (state.time < 0 || state.duration <= 0 || state.hull < 0 || state.hull > 100 || state.score < 0 || state.buoys < 0) return false;
+    if (!finiteFields(state.boat, ['x', 'z', 'vx', 'roll', 'steer', 'speed']) || state.boat.speed < 0) return false;
+    if (state.boat.effects !== undefined && !validEffects(state.boat.effects)) return false;
+    if (state.pace !== undefined && (!finiteFields(state.pace, ['tier', 'baseSpeed']) ||
+      !(state.pace.nextAt === null || Number.isFinite(state.pace.nextAt) && state.pace.nextAt >= 0))) return false;
+    if (!Array.isArray(state.players) || state.players.length < 1 || state.players.length > 4) return false;
+    const ids = new Set();
+    for (const p of state.players) {
+      if (!finiteFields(p, ['x', 'y', 'z', 'vx', 'vy', 'vz', 'swimTime', 'rescueProgress'])) return false;
+      if (!text(p.id, 30) || !p.id || ids.has(p.id) || !text(p.name, 18) || !/^#[a-f0-9]{6}$/i.test(p.color)) return false;
+      if (!['deck', 'air', 'swim', 'rescue'].includes(p.state) || typeof p.brace !== 'boolean') return false;
+      if (p.snack !== null && !text(p.snack, 32)) return false;
+      if (p.effects !== undefined && !validEffects(p.effects)) return false;
+      if (p.rescuer !== undefined && p.rescuer !== null && !text(p.rescuer, 30)) return false;
+      ids.add(p.id);
+    }
+    if (!Array.isArray(state.obstacles) || state.obstacles.length > 64 || !state.obstacles.every(o =>
+      finiteFields(o, ['x', 'z', 'radius']) && entityId(o.id) && text(o.type, 32) && o.radius > 0 && typeof o.active === 'boolean')) return false;
+    if (!Array.isArray(state.waves) || state.waves.length > 32 || !state.waves.every(w =>
+      finiteFields(w, ['z', 'side', 'strength']) && entityId(w.id) && typeof w.hit === 'boolean' && text(w.kind, 32))) return false;
+    if (!Array.isArray(state.events) || state.events.length > 16 || !state.events.every(e =>
+      record(e) && entityId(e.id) && text(e.text, 512) && text(e.kind, 32) && Number.isFinite(e.at))) return false;
+    if (!finiteFields(state.stats, ['rescues', 'crates', 'treasure', 'falls', 'perfectBraces'])) return false;
+    if (state.impacts !== undefined && (!Array.isArray(state.impacts) || state.impacts.length > 16 || !state.impacts.every(i =>
+      finiteFields(i, ['x', 'z', 'at', 'damage']) && entityId(i.id) &&
+      ['crate', 'wreck', 'whale', 'reef', 'thunder'].includes(i.kind) && typeof i.blocked === 'boolean'))) return false;
+
+    // Optional v2 fields and future cosmetic fields must still be finite, shallow JSON data.
+    // This also rejects cyclic objects, undefined, typed arrays, and oversized nested payloads.
+    let nodes = 0;
+    const validValue = (value, depth = 0) => {
+      if (++nodes > 12_000 || depth > 8) return false;
+      if (value === null || typeof value === 'boolean') return true;
+      if (typeof value === 'number') return Number.isFinite(value);
+      if (typeof value === 'string') return value.length <= 2048;
+      if (Array.isArray(value)) return value.length <= 512 && value.every(item => validValue(item, depth + 1));
+      return record(value) && Object.keys(value).length <= 64 && Object.values(value).every(item => validValue(item, depth + 1));
+    };
+    return validValue(state) && encoder.encode(JSON.stringify(state)).byteLength < MAX_PACKET;
+  } catch { return false; }
+}
 
 export function normalizeRoomCode(code) {
   const value = String(code ?? '').trim().toUpperCase();
@@ -263,9 +322,9 @@ export class CrewNetwork extends EventTarget {
     else if (data.type === 'start' && Number.isSafeInteger(data.run) && data.run > (s.run || 0)) {
       s.run = data.run; s.inputSeq = 0; s.snapshotSeq = 0; s.playing = true;
       this._emit('start', data.config);
-    } else if (data.type === 'snapshot' && data.run === s.run && Number.isSafeInteger(data.seq) && data.seq > (s.snapshotSeq || 0)) {
+    } else if (data.type === 'snapshot' && data.run === s.run && Number.isSafeInteger(data.seq) && data.seq > (s.snapshotSeq || 0) && validSnapshot(data.state)) {
       s.snapshotSeq = data.seq;
-      if (data.state && typeof data.state === 'object') this._emit('snapshot', data.state);
+      this._emit('snapshot', data.state);
     } else if (data.type === 'ping') this._send(link, packet('pong'));
   }
 
@@ -297,7 +356,7 @@ export class CrewNetwork extends EventTarget {
   _send(link, data) {
     if (!link?.connection?.open) return false;
     try {
-      if (JSON.stringify(data).length > MAX_PACKET || link.connection.bufferSize > 8) return false;
+      if (encoder.encode(JSON.stringify(data)).byteLength > MAX_PACKET || link.connection.bufferSize > 8) return false;
       link.connection.send(data); return true;
     } catch { return false; }
   }

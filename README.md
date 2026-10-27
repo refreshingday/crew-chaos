@@ -33,13 +33,28 @@ Choose a two-, three-, or four-minute voyage. Survive until the lighthouse with 
 | Call for help | Q | ! button | North button |
 | Instructions / solo pause | Escape or ? | ? | — |
 
-Stand left or right to turn. The average position of all crew members determines the ship’s steering. Bracing reduces launch forces and walking speed. Unbraced waves can throw sailors into the air and sea. Move to the same side as a swimmer and hold rescue. Solo sailors have an automatic lifeline. Emergency recovery consumes buoys, then hull.
+Stand left or right to turn across an ocean with no sideways limit. Obstacles spawn around the boat’s current route. Stand at the bow to accelerate, or at the stern to slow down; the boat always maintains a minimum forward speed. Every 20 seconds in the standard three-minute voyage, the underlying cruising speed increases. Shorter and longer voyages scale that schedule proportionally. The speed display shows actual speed, trim direction, and the current pace level.
 
-Collect treasure for score, repair crates for hull, and snacks for temporary abilities:
+Big breakers visibly travel toward the boat in finite-width bands. Steer outside their foamy edges to dodge, or brace if you cross them. Unbraced waves can throw sailors into the air and sea. Obstacle collisions launch every sailor currently on deck, with a smaller jump while braced, plus an impact burst and large damage number. The rolling sea and matching ship rise/fall are cosmetic and do not add hidden launch forces.
 
-- **Bubble Fruit:** protects against one fall.
-- **Chili Noodles:** faster walking.
-- **Anchor Biscuit:** resists knockback, with slower movement.
+Move to the same side as a swimmer and hold rescue. Solo sailors have an automatic lifeline. Emergency recovery consumes buoys, then hull.
+
+Collect treasure for score, repair crates for hull, and twelve strange snacks. One snack can be held; use it with E or Use when you are not rescuing. Active effects have visible timers, and the in-game briefing contains the full snack galley.
+
+| Snack | Effect |
+|---|---|
+| Bubble Fruit | Bounces you back aboard after your next fall. |
+| Chili Noodles | Faster movement across the deck. |
+| Anchor Biscuit | Wave resistance, with slower movement. |
+| Rubber Jelly | Stronger air control and a springy, forgiving landing. |
+| Magnet Mint | The whole boat collects supplies from farther away. |
+| Ghost Grape | Temporarily phase the boat harmlessly through obstacles. |
+| Balloon Berry | Float with lower gravity during launches. |
+| Disco Donut | Double treasure value while the boat dances with color. |
+| Banana Boat | Slippery feet and a 25% treasure bonus. |
+| Thunder Pop | Instantly clear nearby hazards with a shockwave. |
+| Giant Dumpling | A larger, heavier sailor steers harder and walks more slowly. |
+| Octopus Candy | Grapple swimmers aboard, or protect the boat against waves. |
 
 ## Play together
 
@@ -55,13 +70,15 @@ The connection approach is adapted from your [multiplayerTest](https://github.co
 ## Structure
 
 - `src/game.js`: seeded authoritative simulation, independent of DOM and Three.js.
+- `src/addons.js`: shared names, icons, descriptions, and durations for all twelve snacks.
 - `src/network.js`: four-character rooms, capacity, handshakes, input validation, snapshots, rematches.
 - `src/renderer.js`: procedural 3D art and animation, created by **GPT-6 Astra** at the user’s request.
+- `src/ocean.js`: shared CPU/shader swell definitions that keep the boat aligned with the visible sea.
 - `src/main.js`: menus, host simulation loop, guest interpolation, input, HUD, and synthesized audio.
 - `src/style.css`: responsive interface and mobile control layout.
 - `tests/`: gameplay and mocked network regression checks.
 
-The first build includes one sea environment, seeded obstacle variations, a final lighthouse, solo and online multiplayer, wave bracing, rescue, repairs, treasure, three snacks, results, and rematch. The GDD’s cosmetic progression, daily challenges, additional biomes, public matchmaking, and extra boats remain future content.
+The current build includes an endless lateral ocean, seeded route-relative encounters, a final lighthouse, solo and online multiplayer, moving avoidable breakers, bow/stern speed control, timed speed escalation, collision launches and effects, rescue, repairs, treasure, twelve snacks, results, and rematch. The GDD’s cosmetic progression, daily challenges, additional biomes, public matchmaking, and extra boats remain future content.
 
 ## Validation
 
@@ -69,4 +86,4 @@ Automated tests cover seeded encounters, steering, braces, recovery, snacks, col
 
 Mocked network tests do not prove carrier compatibility. Local real-browser tests and their exact scope are recorded in `docs/VALIDATION.md`. Physical phone performance and cross-carrier NAT behavior still need device testing before a production release.
 
-No accounts, analytics, or purchases are required. Optional fonts load from Google Fonts; system fallbacks are provided. All 3D meshes and effects are generated locally in the browser.
+The game itself has no account, analytics, or purchase system. The current private Sites preview requires its owner’s ChatGPT sign-in; the downloadable static build can be placed on other HTTPS hosting. Optional fonts load from Google Fonts; system fallbacks are provided. All 3D meshes and effects are generated locally in the browser.

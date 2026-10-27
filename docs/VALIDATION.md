@@ -4,7 +4,7 @@ Build date: 27 October 2026.
 
 ## Automated checks
 
-- `npm test`: 25 passing tests (16 gameplay, 9 mocked network).
+- `npm test`: 46 passing tests (31 gameplay, 15 networking/integration).
 - `npm run build`: successful static production build.
 - An additional simulation review exercised 240 full voyages: 20 seeds × 1–4 players × three input strategies. Ordinary navigation toward clear lanes plus timely bracing finished 80/80 voyages; idle crews failed 80/80. These are simulated strategies, not human usability results.
 
@@ -21,6 +21,17 @@ Observed in the Codex in-app Chromium browser:
 - The original development water shader compilation failure was repaired and the removed shadow constant replaced before the final build.
 
 The real multiplayer test used separate browser peers on the same computer/network. It does not establish cross-carrier reachability or physical touchscreen behavior. Sustained four-device sessions and remote-input latency still need device coverage.
+
+## Open-ocean update
+
+- Regression tests cover unlimited lateral travel, route-relative spawning far beyond the former boundary, collision jumps for all deck sailors, finite-width wave collision/dodge behavior, wave movement and warning time, bow/stern speed trim, all eight scheduled speed increases, and twelve distinct functional add-ons.
+- Networking integration advances the actual game through all pace tiers and victory, broadcasting 31 real snapshots to three connected mocked guests. Final-tier defeat is also covered. This caught and repaired rejection of the final tier’s `nextAt: null` value.
+- Browser visual checks use development-only, click-driven fixtures that call the real simulation. A wreck collision produced 15 hull damage, an airborne sailor, visible impact particles/rings, and a large projected −15 number.
+- An approaching finite breaker, sideways camera recentering beyond x=150, the full twelve-effect visual combination, and stern braking toward the 6.5 minimum were inspected. Bow acceleration was confirmed in the speed/trim HUD.
+- The updated portrait layout was inspected at 390×844, with touch controls, speed/trim/pace display, and an approaching moving breaker. Header controls were moved to avoid the score panel.
+- Astra’s partial art pass was completed with missing flash/ghost color constants, less obscuring hit feedback, and effect-material cleanup. Browser error logs were clear during collision and all-add-on checks.
+- Live v2 room `FCQ8` connected a host and guest through public PeerJS signaling. Both displayed the same 2:14 countdown and 12.5 speed after launch; the guest’s error log was empty. This is a same-computer/network check, separate from the full-voyage mocked transport regression.
+- Development fixture controls are excluded from the production JavaScript build.
 
 ## Remaining device coverage
 
