@@ -2,6 +2,12 @@
 
 A playable 3D HTML/WebGL cooperative boat game for **1–4 players**, built with Three.js, Vite, and PeerJS. The boat moves forward automatically. Your positions on deck steer it.
 
+## Play online
+
+**[Play Crew Chaos!](https://refreshingday.github.io/crew-chaos/)**
+
+Open the link on your phone or PC. One player creates a room, then friends join using the four-character code. The GitHub Pages edition is public and requires no ChatGPT sign-in.
+
 ## Run locally
 
 Requires Node.js 22.12+.
@@ -20,6 +26,10 @@ npm run preview
 ```
 
 `dist/` contains the complete static deployable build. It can be hosted on ordinary static HTTPS hosting. No Node application server or custom gameplay backend is deployed.
+
+## GitHub Pages deployment
+
+The workflow in `.github/workflows/pages.yml` installs the locked dependencies, runs the gameplay/networking tests, builds with Vite, and publishes `dist/` to GitHub Pages. Push changes to `main` to update the hosted game, or run the workflow manually from GitHub Actions. The Vite relative base supports the `/crew-chaos/` project path.
 
 ## Play
 
@@ -86,4 +96,4 @@ Automated tests cover seeded encounters, steering, braces, recovery, snacks, col
 
 Mocked network tests do not prove carrier compatibility. Local real-browser tests and their exact scope are recorded in `docs/VALIDATION.md`. Physical phone performance and cross-carrier NAT behavior still need device testing before a production release.
 
-The game itself has no account, analytics, or purchase system. The current private Sites preview requires its owner’s ChatGPT sign-in; the downloadable static build can be placed on other HTTPS hosting. Optional fonts load from Google Fonts; system fallbacks are provided. All 3D meshes and effects are generated locally in the browser.
+The game itself has no account, analytics, or purchase system. The public GitHub Pages game requires no sign-in. An earlier private Sites preview requires its owner’s ChatGPT sign-in; the downloadable static build can also be placed on other HTTPS hosting. Optional fonts load from Google Fonts; system fallbacks are provided. All 3D meshes and effects are generated locally in the browser.
