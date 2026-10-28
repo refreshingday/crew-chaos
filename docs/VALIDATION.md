@@ -1,10 +1,10 @@
 # Validation record
 
-Build date: 27 October 2026.
+Build date: 28 October 2026.
 
 ## Automated checks
 
-- `npm test`: 46 passing tests (31 gameplay, 15 networking/integration).
+- `npm test`: 55 passing tests (38 gameplay, 17 networking/integration).
 - `npm run build`: successful static production build.
 - An additional simulation review exercised 240 full voyages: 20 seeds × 1–4 players × three input strategies. Ordinary navigation toward clear lanes plus timely bracing finished 80/80 voyages; idle crews failed 80/80. These are simulated strategies, not human usability results.
 
@@ -32,6 +32,16 @@ The real multiplayer test used separate browser peers on the same computer/netwo
 - Astra’s partial art pass was completed with missing flash/ghost color constants, less obscuring hit feedback, and effect-material cleanup. Browser error logs were clear during collision and all-add-on checks.
 - Live v2 room `FCQ8` connected a host and guest through public PeerJS signaling. Both displayed the same 2:14 countdown and 12.5 speed after launch; the guest’s error log was empty. This is a same-computer/network check, separate from the full-voyage mocked transport regression.
 - Development fixture controls are excluded from the production JavaScript build.
+
+## Solid islands, automatic boarding, and stylized sea — 28 October
+
+- Gameplay regressions cover bow/rail island hits, elliptical corner misses, physical hull separation, one damage event per shore contact, renewed damage after separation, ghost passage, indestructible land, and route-relative island spawning.
+- Swimming tests cover both rails, bow, stern and a curved hull corner. Approaching any hull edge starts a short automatic climb without input, buoy consumption or score changes; distant swimmers remain in the water. A late all-crew climb near the wipe timer is verified to complete without emergency penalties.
+- Protocol 3 uses a new room namespace to isolate older renderers. A real simulation island collision and its climbing/aboard snapshots reach a mocked guest; invalid island dimensions are rejected.
+- Local browser fixtures verified an island hit at 82% hull, an airborne sailor, shore impact particles and a large −18 damage label. Actual keyboard swimming returned the sailor from both rails, the bow and stern with the “climbed back aboard” event and both emergency buoys intact.
+- The revised ocean was inspected in desktop gameplay and 390×844 / 844×390 touch layouts. The ship and crew stayed readable, with curved swells, darker troughs and broken crest foam. Astra’s numerical sweep of 26,250 poses found at least 0.572 units of deck-edge clearance from cosmetic swells on a level gameplay hull; it does not establish every combined collision/roll pose.
+- Production-preview room `BWKN` connected a host and guest through public signaling. Both showed the same 2:52 countdown and 10.0 speed with the new ocean and authoritative islands; both browser error logs were empty. These peers shared one computer/network.
+- The static production build excludes development fixture controls and inspection hooks. Physical phone performance remains unmeasured.
 
 ## Remaining device coverage
 

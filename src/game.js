@@ -3,9 +3,47 @@ import { ADDONS, ADDON_IDS } from './addons.js';
 const DECK_Y = 1.8;
 const DECK_X = 3.65;
 const DECK_Z = 2.35;
+// Keep the collision hull identical to the visible deck, including its pointed bow.
+const BOAT_OUTLINE = [[-3.7,-3.15],[-4.25,-2.6],[-4.4,-1],[-4.1,1.5],[-3.15,2.8],[-1.8,3.65],[0,4.05],[1.8,3.65],[3.15,2.8],[4.1,1.5],[4.4,-1],[4.25,-2.6],[3.7,-3.15]];
+const BOARDING_REACH = .75;
 const COLORS = ['#ffbf47', '#65e6d1', '#ff7997', '#a899ff'];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const approach = (a, b, speed, dt) => a + (b - a) * (1 - Math.exp(-speed * dt));
+
+function distanceToPolygon(x, z, points) {
+  let inside = false;
+  let nearest = { x: points[0][0], z: points[0][1], distance: Infinity };
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [ax, az] = points[j], [bx, bz] = points[i];
+    if ((az > z) !== (bz > z) && x < (bx - ax) * (z - az) / (bz - az) + ax) inside = !inside;
+    const dx = bx - ax, dz = bz - az;
+    const t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1);
+    const px = ax + dx * t, pz = az + dz * t, distance = Math.hypot(x - px, z - pz);
+    if (distance < nearest.distance) nearest = { x: px, z: pz, distance };
+  }
+  return { ...nearest, inside };
+}
+
+// Transform the ellipse to a unit circle, then find its nearest hull edge. This
+// avoids the square corner collisions produced by a radius-only bounding box.
+function islandContact(boat, island, margin = 0) {
+  const rx = island.radius + margin, rz = (island.radiusZ || island.radius * .75) + margin;
+  if (Math.abs(boat.x - island.x) > rx + 4.4 || Math.abs(boat.z - island.z) > rz + 4.05) return null;
+  const points = BOAT_OUTLINE.map(([x, z]) => [(boat.x + x - island.x) / rx, (boat.z + z - island.z) / rz]);
+  const nearest = distanceToPolygon(0, 0, points);
+  if (!nearest.inside && nearest.distance >= 1) return null;
+  const d = Math.max(nearest.distance, .0001);
+  const direction = nearest.inside ? -1 : 1;
+  let nx = nearest.x / d * direction, nz = nearest.z / d * direction;
+  if (nearest.distance < .0001) {
+    const cx = (boat.x - island.x) / rx, cz = (boat.z - island.z) / rz;
+    const length = Math.hypot(cx, cz) || 1;
+    nx = cx / length; nz = cz / length;
+  }
+  const depth = nearest.inside ? 1 + nearest.distance : 1 - nearest.distance;
+  return { dx: nx * rx * (depth + .002), dz: nz * rz * (depth + .002),
+    x: island.x + nx * rx, z: island.z + nz * rz, nx, nz };
+}
 
 function randomGenerator(seed) {
   let n = seed >>> 0;
@@ -42,7 +80,7 @@ export class Game {
         vx: 0, vz: 0, vy: 0, state: 'deck', brace: false, snack: null,
         shield: 0, boost: 0, anchor: 0, invulnerable: 1, swimTime: 0,
         swimElapsed: 0, rescueProgress: 0, rescueTarget: null, rescuer: null,
-        automaticRescue: false, ping: 0,
+        automaticRescue: false, boarding: false, boardX: 0, boardZ: 0, ping: 0,
         effects: Object.fromEntries(ADDON_IDS.map(id => [id, 0])), jellyBounced: false,
       })),
       obstacles: [], waves: [], events: [], impacts: [],
@@ -50,6 +88,11 @@ export class Game {
     };
     this.event('All aboard! Move across the deck to steer.', 'tip');
     this.spawnSupply(0, 42, 'treasure');
+    // Islands belong to the host simulation rather than looping cosmetic scenery.
+    for (let i = 0; i < 8; i++) {
+      const side = i % 2 ? 1 : -1;
+      this.spawnIsland(side * (31 + (i % 3) * 9), 36 + i * 32, i % 4);
+    }
   }
 
   event(text, kind = 'info') {
@@ -75,6 +118,12 @@ export class Game {
 
   spawnSupply(x, z, type = 'supply') {
     this.state.obstacles.push({ id: this.nextId++, type, x, z, radius: 1, active: true });
+  }
+
+  spawnIsland(x, z, variant = Math.floor(this.random() * 4)) {
+    const radius = 2 * (2.6 + variant * .7);
+    this.state.obstacles.push({ id: this.nextId++, type: 'island', x, z,
+      radius, radiusZ: radius * .75, active: true, variant, touching: false });
   }
 
   nextAddon() {
@@ -128,6 +177,10 @@ export class Game {
     if (this.chunkCount % 2 === 1 || recovery) {
       this.spawnSupply(safeLane, z - 8, 'snack');
       s.obstacles.at(-1).snack = this.nextAddon();
+    }
+    if (this.chunkCount % 2 === 0) {
+      const side = this.chunkCount % 4 ? 1 : -1;
+      this.spawnIsland(routeX + side * (31 + this.random() * 16), z + 18);
     }
     this.nextChunk = s.time + (recovery ? 7 : gentle ? 7 : progress > .7 ? 4.8 : 6.2);
   }
@@ -216,7 +269,9 @@ export class Game {
     s.obstacles = s.obstacles.filter(o => o.z > s.boat.z - 32 && Math.abs(o.x - s.boat.x) < 220);
     s.waves = s.waves.filter(w => w.z > s.boat.z - 35);
 
-    const active = s.players.some(p => p.state === 'deck' || p.state === 'air');
+    // Reaching the hull is already a successful recovery. A climb must finish
+    // before considering an emergency buoy, even when the entire crew is wet.
+    const active = s.players.some(p => p.state === 'deck' || p.state === 'air' || p.state === 'rescue' && p.boarding);
     s.wipeTime = !active && s.players.length > 1 ? s.wipeTime + dt : 0;
     if (s.wipeTime > 3 && s.buoys > 0) {
       s.buoys--;
@@ -269,10 +324,15 @@ export class Game {
     } else if (p.state === 'swim') {
       p.swimElapsed += dt;
       p.swimTime = Math.max(0, p.swimTime - dt);
-      p.x = clamp(p.x + dx * 2 * dt, -7, 7);
-      p.z = clamp(p.z + (dz * 1.8 - .35) * dt, -8.5, 3.5);
+      p.x = clamp(p.x + dx * 2 * dt, -9, 9);
+      p.z = clamp(p.z + (dz * 1.8 - .35) * dt, -10, 6.5);
       p.y = .25;
-      if (s.players.length === 1 && p.swimElapsed > 2.1) {
+      const hull = distanceToPolygon(p.x, p.z, BOAT_OUTLINE);
+      if (p.swimElapsed > .18 && (hull.inside || hull.distance <= BOARDING_REACH)) {
+        p.state = 'rescue'; p.automaticRescue = true; p.boarding = true;
+        p.rescueProgress = 0; p.rescuer = null;
+        p.boardX = clamp(p.x, -DECK_X, DECK_X); p.boardZ = clamp(p.z, -DECK_Z, DECK_Z);
+      } else if (s.players.length === 1 && p.swimElapsed > 2.1) {
         if (s.buoys > 0) s.buoys--;
         else s.hull = Math.max(0, s.hull - 10);
         this.beginAutoRescue(p);
@@ -284,11 +344,15 @@ export class Game {
         this.event('Emergency lifeline! Keep an eye on your crew.', 'rescue');
       }
     } else if (p.state === 'rescue' && p.automaticRescue) {
-      p.rescueProgress += dt / 1.2;
-      p.y = .25 + p.rescueProgress * DECK_Y;
-      p.x = approach(p.x, Math.sign(p.x || 1) * 2.6, 3, dt);
-      p.z = approach(p.z, -.7, 3, dt);
-      if (p.rescueProgress >= 1) this.finishRescue(p, false);
+      p.rescueProgress += dt / (p.boarding ? .45 : 1.2);
+      p.y = .25 + p.rescueProgress * (DECK_Y - .25);
+      p.x = approach(p.x, p.boarding ? p.boardX : Math.sign(p.x || 1) * 2.6, p.boarding ? 8 : 3, dt);
+      p.z = approach(p.z, p.boarding ? p.boardZ : -.7, p.boarding ? 8 : 3, dt);
+      if (p.rescueProgress >= 1) {
+        const climbed = p.boarding;
+        this.finishRescue(p, false, climbed);
+        if (climbed) this.event(`${p.name} climbed back aboard!`, 'rescue');
+      }
     }
 
     if (input.interact && !this.lastInteract[p.id] && p.state === 'deck' && !p.brace && p.snack) {
@@ -340,12 +404,13 @@ export class Game {
       return;
     }
     p.state = 'swim'; p.y = .25;
-    p.x = clamp(p.x, -6.5, 6.5); p.z = clamp(p.z, -7, 2.5);
+    p.x = clamp(p.x, -8, 8); p.z = clamp(p.z, -9, 6);
     p.vx = p.vz = p.vy = 0; p.brace = false;
     p.swimTime = this.state.players.length === 2 ? 12 : 10;
     p.swimElapsed = 0; p.rescueProgress = 0; p.rescuer = null;
+    p.automaticRescue = false; p.boarding = false;
     this.state.stats.falls++;
-    this.event(`${p.name} overboard! Go to their side and hold RESCUE.`, 'danger');
+    this.event(`${p.name} overboard! Swim to the hull to climb aboard, or hold RESCUE from the deck.`, 'danger');
   }
 
   canRescue(rescuer, swimmer) {
@@ -376,14 +441,16 @@ export class Game {
   }
 
   beginAutoRescue(p) {
-    p.state = 'rescue'; p.automaticRescue = true; p.rescueProgress = 0; p.rescuer = null;
+    p.state = 'rescue'; p.automaticRescue = true; p.boarding = false; p.rescueProgress = 0; p.rescuer = null;
     this.state.score = Math.max(0, this.state.score - 75);
   }
 
-  finishRescue(p, manual) {
-    p.state = 'deck'; p.x = Math.sign(p.x || 1) * 2.55; p.z = -.4; p.y = DECK_Y;
+  finishRescue(p, manual, climbed = false) {
+    p.state = 'deck';
+    p.x = climbed ? clamp(p.boardX, -DECK_X, DECK_X) : Math.sign(p.x || 1) * 2.55;
+    p.z = climbed ? clamp(p.boardZ, -DECK_Z, DECK_Z) : -.4; p.y = DECK_Y;
     p.vx = p.vz = p.vy = 0; p.invulnerable = 2;
-    p.automaticRescue = false; p.rescuer = null; p.rescueProgress = 0; p.swimTime = 0;
+    p.automaticRescue = false; p.boarding = false; p.rescuer = null; p.rescueProgress = 0; p.swimTime = 0;
     if (manual) {
       this.state.stats.rescues++;
       // Falls only originate from hazards, and each swimmer can award one rescue.
@@ -408,7 +475,7 @@ export class Game {
       s.boat.effects.thunder = duration;
       let cleared = 0;
       for (const obstacle of s.obstacles) {
-        if (obstacle.active && !['treasure', 'snack', 'supply'].includes(obstacle.type)
+        if (obstacle.active && !['treasure', 'snack', 'supply', 'island'].includes(obstacle.type)
           && Math.hypot(obstacle.x - s.boat.x, obstacle.z - s.boat.z) < 28) {
           obstacle.active = false; cleared++;
         }
@@ -432,12 +499,28 @@ export class Game {
     const s = this.state;
     for (const o of s.obstacles) {
       if (!o.active) continue;
+      const island = o.type === 'island';
+      let contact = null;
+      if (island) {
+        contact = islandContact(s.boat, o);
+        if (!contact) {
+          if (!islandContact(s.boat, o, .3)) o.touching = false;
+          continue;
+        }
+        // The shore is solid. Preserve automatic forward thrust but allow the
+        // crew to steer and slide around it; it never vanishes after a bump.
+        if (s.boat.effects.ghost <= 0) {
+          s.boat.x += contact.dx; s.boat.z += contact.dz;
+        }
+        if (o.touching) continue;
+        o.touching = true;
+      }
       const collectible = ['supply', 'snack', 'treasure'].includes(o.type);
       const reach = collectible && s.boat.effects.magnet > 0 ? 8 : 3.4;
       const dz = Math.abs(o.z - s.boat.z);
-      if (dz > reach + o.radius) continue;
+      if (!island && dz > reach + o.radius) continue;
       const dx = Math.abs(o.x - s.boat.x);
-      if (dx > reach + o.radius) continue;
+      if (!island && dx > reach + o.radius) continue;
       if (collectible) {
         if (o.type === 'supply') {
           s.hull = Math.min(100, s.hull + 18);
@@ -456,16 +539,16 @@ export class Game {
         o.active = false;
       } else if (this.collisionCooldown <= 0) {
         if (s.boat.effects.ghost > 0) {
-          o.active = false;
-          this.impact(o.type, o.x, o.z, 0, true);
+          if (!island) o.active = false;
+          this.impact(o.type, contact?.x ?? o.x, contact?.z ?? o.z, 0, true);
           this.event('Ghost Grape! Phased through the obstacle.', 'good');
           continue;
         }
-        const damage = { crate: 6, wreck: 15, whale: 12, reef: 9 }[o.type] || 8;
+        const damage = { crate: 6, wreck: 15, whale: 12, reef: 9, island: 18 }[o.type] || 8;
         s.hull = Math.max(0, s.hull - damage);
         this.collisionCooldown = 1.3;
-        o.active = false;
-        this.impact(o.type, o.x, o.z, damage, false);
+        if (!island) o.active = false;
+        this.impact(o.type, contact?.x ?? o.x, contact?.z ?? o.z, damage, false);
         s.boat.vx += (s.boat.x >= o.x ? 1 : -1) * 2;
         for (const p of s.players) {
           if (p.state !== 'deck') continue;
@@ -499,4 +582,4 @@ export class Game {
   }
 }
 
-export const GAME_CONSTANTS = { DECK_Y, DECK_X, DECK_Z, COLORS };
+export const GAME_CONSTANTS = { DECK_Y, DECK_X, DECK_Z, BOAT_OUTLINE, BOARDING_REACH, COLORS };

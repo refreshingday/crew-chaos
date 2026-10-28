@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ADDONS } from './addons.js';
+import { GAME_CONSTANTS } from './game.js';
 import { OCEAN_GLSL, sampleOceanHeight } from './ocean.js';
 
 // All art is generated locally: small shared meshes, no network assets or textures.
@@ -119,34 +120,66 @@ export class CrewRenderer {
   }
 
   makeOcean() {
-    const geometry = new THREE.PlaneGeometry(240, 320, 70, 100);
+    // ~36k vertices / one draw call: enough samples for real curved silhouettes,
+    // without reflection render targets, CPU vertex updates or a water postpass.
+    const geometry = new THREE.PlaneGeometry(240, 320, 160, 224);
     geometry.rotateX(-Math.PI / 2);
     this.oceanMaterial = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uTravel: { value: 0 }, uWorldX: { value: 0 }, uAmplitude: { value: 1 }, uFog: { value: new THREE.Color(0xb9ebed) } },
       vertexShader: `
         uniform float uTime; uniform float uTravel; uniform float uWorldX; uniform float uAmplitude;
-        varying vec3 vPos; varying float vDepth;
+        varying vec3 vPos; varying vec3 vWorld; varying vec3 vNormal;
+        varying vec2 vCrests; varying float vDepth;
         ${OCEAN_GLSL}
         void main() {
           vec3 p = position; float z = p.z + uTravel; float x = p.x + uWorldX;
-          p.y = oceanHeight(x,z,uTime);
+          vec3 surface = oceanSurface(x,z,uTime,vCrests);
+          p.y = surface.x;
+          vNormal = mat3(modelMatrix) * vec3(-surface.y,1.,-surface.z);
           vec4 world = modelMatrix * vec4(p,1.);
+          vWorld = world.xyz;
           vPos = vec3(x,p.y,z);
           vec4 mv = viewMatrix * world; vDepth = -mv.z;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
         uniform float uTime; uniform vec3 uFog;
-        varying vec3 vPos; varying float vDepth;
+        varying vec3 vPos; varying vec3 vWorld; varying vec3 vNormal;
+        varying vec2 vCrests; varying float vDepth;
+        float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+        float noise(vec2 p) {
+          vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+          return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);
+        }
         void main() {
-          vec3 normal = normalize(cross(dFdx(vPos), dFdy(vPos)));
-          float light = abs(dot(normal, normalize(vec3(-.4,1.,-.6))));
-          float colorPatch = sin(vPos.x*.10+vPos.z*.16)*.5+.5;
-          vec3 water = mix(vec3(.008,.22,.32),vec3(.025,.5,.47),colorPatch*.65+.2);
-          water *= .66+light*.4+normal.x*.22+normal.z*.18;
-          float ripple = sin(vPos.z*1.35+uTime*2.8)*(.5+.5*sin(vPos.x*.85));
-          float glint = smoothstep(.965,1.,ripple)*.32;
-          water += vec3(.55,.8,.77)*glint;
+          // Lighting follows displaced geometry. Tiny capillary detail only
+          // perturbs reflection; it cannot turn the swells into a checkerboard.
+          vec3 normal = normalize(vNormal + vec3(
+            .025*cos(vPos.x*1.8+vPos.z*2.1+uTime*2.7),0.,
+            .035*cos(vPos.z*2.4+.7*sin(vPos.x*.7)+uTime*3.2)));
+          vec3 view = normalize(cameraPosition-vWorld);
+          vec3 sun = normalize(vec3(-.45,.8,-.55));
+          float diffuse = max(0.,dot(normal,sun));
+          float elevation = smoothstep(-1.65,1.65,vPos.y);
+          float face = smoothstep(-.35,.38,normal.z);
+          vec3 water = mix(vec3(.006,.065,.19),vec3(.015,.40,.49),elevation);
+          water = mix(water,vec3(.025,.59,.58),elevation*face*.5);
+          water *= .65 + diffuse*.48;
+          float fresnel = pow(1.-max(0.,dot(normal,view)),4.);
+          water = mix(water,vec3(.32,.69,.79),fresnel*.6);
+          float glint = pow(max(0.,dot(normal,normalize(sun+view))),110.);
+          water += vec3(1.,.91,.69)*glint*.8;
+          // Broken, curving foam ribbons live on physical crests, never on a
+          // fixed UV grid. Distant ribbons fade before becoming subpixel noise.
+          float breakup = noise(vec2(vPos.x*.16,vPos.z*.12-uTime*.025));
+          float grain = noise(vPos.xz*2.4);
+          float edge = noise(vPos.xz*.9)*.016;
+          float crest = smoothstep(.961+edge,.985,vCrests.x);
+          float secondary = smoothstep(.98,1.,vCrests.y)*smoothstep(.35,1.1,vPos.y)*.3;
+          float foam = max(crest,secondary)*smoothstep(.40,.52,breakup);
+          foam *= .4+.6*smoothstep(.25,.58,grain);
+          foam *= 1.-smoothstep(65.,135.,vDepth);
+          water = mix(water,vec3(.79,.98,.90),foam*.9);
           float fog = smoothstep(80.,180.,vDepth);
           gl_FragColor = vec4(mix(water,uFog,fog),1.);
           #include <tonemapping_fragment>
@@ -161,7 +194,7 @@ export class CrewRenderer {
 
   makeBoat() {
     const boat = new THREE.Group();
-    const outline = [[-3.7,-3.15],[-4.25,-2.6],[-4.4,-1],[-4.1,1.5],[-3.15,2.8],[-1.8,3.65],[0,4.05],[1.8,3.65],[3.15,2.8],[4.1,1.5],[4.4,-1],[4.25,-2.6],[3.7,-3.15]];
+    const outline = GAME_CONSTANTS.BOAT_OUTLINE;
     const hullVertices = [], hullIndices = [];
     for (let ring = 0; ring < 3; ring++) {
       const scale = [0.72, 0.94, 1][ring], height = [0.15, 0.55, 1.65][ring];
@@ -463,7 +496,9 @@ export class CrewRenderer {
 
   makeObstacle(type, radius=1, snack='bubble') {
     const g=new THREE.Group();
-    if(type==='whale') {
+    if(type==='island') {
+      this.makeIslandArt(g,radius);
+    } else if(type==='whale') {
       this.mesh(g,'sphere',C.whale,[0,.3,0],[2.4,1.25,4.15]);
       this.mesh(g,'sphere',C.whaleLight,[0,.25,-2.48],[1.8,.79,1.53]);
       this.mesh(g,'sphere',C.whale,[0,.68,-2.5],[2.05,.91,1.49]);
@@ -538,8 +573,11 @@ export class CrewRenderer {
     }
     // Sparse foam scallops separate every floating silhouette from the water.
     const foam=new THREE.Group(); g.add(foam);
-    const size=type==='whale'?3:type==='wreck'?2.4:type==='reef'?1.7:1.1;
-    for(let i=0;i<9;i++) { const a=i*TAU/9; this.mesh(foam,'sphere',0xcdfcf1,[Math.cos(a)*size,.03,Math.sin(a)*size],[.28,.035,.12]); }
+    const size=type==='island'?radius:type==='whale'?3:type==='wreck'?2.4:type==='reef'?1.7:1.1;
+    for(let i=0;i<(type==='island'?24:9);i++) {
+      const a=i*TAU/(type==='island'?24:9);
+      this.mesh(foam,'sphere',0xcdfcf1,[Math.cos(a)*size,.03,Math.sin(a)*size*(type==='island'?.75:1)],[type==='island'?.55:.28,.035,type==='island'?.22:.12]);
+    }
     g.userData.type=type; g.userData.foam=foam;
     const animated=[];
     if(g.userData.sparkle) animated.push(g.userData.sparkle);
@@ -572,24 +610,22 @@ export class CrewRenderer {
     this.world.add(g);return g;
   }
 
-  makeScenery() {
-    this.scenery=[];
-    for(let i=0;i<12;i++) {
-      const island=new THREE.Group(), side=i%2?1:-1;
-      island.position.set(side*(31+(i%3)*9),0,i*28-30);
-      const scale=2.6+(i%4)*.7;
-      this.mesh(island,'sphere',0xf4dc9a,[0,-.4,0],[scale*2,.85,scale*1.5]);
-      this.mesh(island,'sphere',0x8abe79,[0,.17,0],[scale*1.5,.75,scale]);
-      for(let r=0;r<3;r++) { const rock=this.mesh(island,'ball',r%2?0xa5b6a0:0x789b8c,[(r-1)*scale*.7,.6+r*.2,.4],[scale*.6,scale*(.55+r*.13),scale*.65]); rock.rotation.y=r; }
+  makeIslandArt(island,radius) {
+      // The sand ellipse matches the simulation collider. Tall skirts keep the
+      // shore solid while cosmetic swells break around a stationary island.
+      const scale=radius/2;
+      this.mesh(island,'sphere',0xf4dc9a,[0,-.4,0],[radius,2.15,radius*.75]);
+      this.mesh(island,'sphere',0x8abe79,[0,1.05,0],[scale*1.5,1.05,scale]);
+      for(let r=0;r<3;r++) { const rock=this.mesh(island,'ball',r%2?0xa5b6a0:0x789b8c,[(r-1)*scale*.7,1.3+r*.2,.4],[scale*.6,scale*(.55+r*.13),scale*.65]); rock.rotation.y=r; }
       for(let p=0;p<2;p++) {
         const x=(p?1:-1)*scale*.55,z=p*1.4-1;
-        this.beam(island,[x,.6,z],[x+.45,4.7,z],.15,C.darkWood);
-        for(let leaf=0;leaf<5;leaf++) { const a=leaf*TAU/5; const palm=this.mesh(island,'sphere',leaf%2?0x369a78:0x57b77c,[x+.45+Math.cos(a)*.85,4.65,Math.sin(a)*.85+z],[1.55,.14,.38]); palm.rotation.y=-a; palm.rotation.z=Math.cos(a)*.22; }
-        this.mesh(island,'sphere',0xc18b56,[x+.48,4.45,z],[.23,.23,.23]);
+        this.beam(island,[x,1.3,z],[x+.45,5.4,z],.15,C.darkWood);
+        for(let leaf=0;leaf<5;leaf++) { const a=leaf*TAU/5; const palm=this.mesh(island,'sphere',leaf%2?0x369a78:0x57b77c,[x+.45+Math.cos(a)*.85,5.35,Math.sin(a)*.85+z],[1.55,.14,.38]); palm.rotation.y=-a; palm.rotation.z=Math.cos(a)*.22; }
+        this.mesh(island,'sphere',0xc18b56,[x+.48,5.15,z],[.23,.23,.23]);
       }
-      this.batchStatic(island,[],false);
-      this.world.add(island);this.scenery.push({object:island,kind:'island',baseZ:i*28-30,offsetX:island.position.x,cycle:null});
-    }
+  }
+
+  makeScenery() {
     this.buoys=[];
     for(let i=0;i<14;i++) {
       const side=i%2?1:-1;
@@ -692,8 +728,8 @@ export class CrewRenderer {
     this.oceanTime=this.reducedMotion?0:state.presentation?this.clock:(state.time||0);
     this.oceanAmplitude=this.reducedMotion?.25:1;
     const heave=this.waterHeight(bx,bz),speed=boat.speed||0;
-    const surfaceRoll=THREE.MathUtils.clamp(Math.atan2(this.waterHeight(bx+3,bz)-this.waterHeight(bx-3,bz),6),-.075,.075);
-    const surfacePitch=THREE.MathUtils.clamp(-Math.atan2(this.waterHeight(bx,bz+3)-this.waterHeight(bx,bz-3),6),-.13,.13);
+    const surfaceRoll=THREE.MathUtils.clamp(Math.atan2(this.waterHeight(bx+3,bz)-this.waterHeight(bx-3,bz),6),-.12,.12);
+    const surfacePitch=THREE.MathUtils.clamp(-Math.atan2(this.waterHeight(bx,bz+3)-this.waterHeight(bx,bz-3),6),-.24,.24);
     const roll=(boat.roll||0)+surfaceRoll;
     const pitch=surfacePitch-THREE.MathUtils.clamp((speed-10)*.002,0,.035);
     this.boat.position.set(bx,heave,bz);
@@ -767,7 +803,7 @@ export class CrewRenderer {
       u.effects.disco.rotation.y=t*2;
       u.effects.chili.rotation.y=t*2.4;
       u.effects.magnet.position.y=Math.sin(t*3)*.1;
-      u.rope.visible=player.state==='rescue'||!!player.rescuer;
+      u.rope.visible=(player.state==='rescue'&&!player.boarding)||!!player.rescuer;
       if(u.rope.visible) {
         const rescuer=(state.players||[]).find(p=>p.id===player.rescuer);
         const startX=bx+(rescuer?rescuer.x:Math.sign(px)*3.9),startZ=bz+(rescuer?rescuer.z:0),startY=heave+2.4;
@@ -788,9 +824,10 @@ export class CrewRenderer {
       if(!object) {object=this.makeObstacle(obstacle.type,obstacle.radius,obstacle.snack);this.obstacleMeshes.set(obstacle.id,object);}
       const phase=typeof obstacle.id==='number'?obstacle.id:String(obstacle.id).length*1.9;
       const ox=obstacle.x||0,oz=obstacle.z||0;
-      object.position.set(ox,this.waterHeight(ox,oz),oz);
-      object.rotation.x=THREE.MathUtils.clamp(-(this.waterHeight(ox,oz+1)-this.waterHeight(ox,oz-1))*.5,-.16,.16);
-      object.rotation.z=THREE.MathUtils.clamp((this.waterHeight(ox+1,oz)-this.waterHeight(ox-1,oz))*.5,-.1,.1);
+      const grounded=obstacle.type==='island';
+      object.position.set(ox,grounded?0:this.waterHeight(ox,oz),oz);
+      object.rotation.x=grounded?0:THREE.MathUtils.clamp(-(this.waterHeight(ox,oz+1)-this.waterHeight(ox,oz-1))*.5,-.24,.24);
+      object.rotation.z=grounded?0:THREE.MathUtils.clamp((this.waterHeight(ox+1,oz)-this.waterHeight(ox-1,oz))*.5,-.12,.12);
       if(object.userData.spray) {object.userData.spray.scale.y=.8+Math.sin(t*2+phase)*.2;object.userData.spray.rotation.y=t*.35;}
       if(object.userData.sparkle) {object.userData.sparkle.rotation.y=t;object.userData.sparkle.position.y=2+Math.sin(t*3)*.15;}
     }
@@ -819,7 +856,6 @@ export class CrewRenderer {
       foam.rotation.y=side*.45;
       foam.visible=(boat.speed||0)>0||state.phase==='lobby';
     }
-    this.updateScenery(this.scenery,bx,bz,336,40);
     this.updateScenery(this.buoys,bx,bz,406,25,true);
     this.updateScenery(this.clouds,bx,bz,290,25);
     const remaining=Math.max(0,(state.duration||180)-(state.time||0));

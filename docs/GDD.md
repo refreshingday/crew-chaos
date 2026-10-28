@@ -17,6 +17,12 @@ Online multiplayer uses four-character alphanumeric room codes and a host-author
 
 Implemented: 1–4 players, 2/3/4-minute voyages, seeded obstacles, weight steering, wave launches, bracing, swimming, manual and solo rescue, emergency recovery, whales, wrecks, crates, treasure, repairs, three snacks, HUD, sound effects, results, and rematches. Later sections also describe future content beyond this first build; see the application README and validation record for the exact delivered scope.
 
+### Shore and recovery revision — 28 October 2026
+
+Visible tropical islands now have authoritative elliptical collision shapes. Shores stop and deflect the hull, deal 18 damage per contact, launch deck crew and remain visible afterward. Ghost Grape phases through them; Thunder Pop cannot destroy land. Swimmers can climb aboard automatically from any nearby hull edge, including the pointed bow and stern, without a button, buoy or score cost. Teammate lifelines and emergency recovery remain available for distant swimmers. These rules supersede the earlier rescue-point-only specifications below.
+
+Astra’s revised sea uses stronger curved geometric swells, analytic surface normals, dark blue troughs, turquoise crests, broken white foam and view-dependent sun highlights. Ship heave and tilt follow that visible surface; cosmetic swells do not launch sailors. See [ocean rendering research](OCEAN_RENDERING.md) for the technical references.
+
 ## 1. High concept
 
 **Playable revision:** Ship steering is now unlimited horizontally, with encounters generated around the moving route. Bow/stern crew placement controls forward speed (minimum 6.5, maximum 22 gameplay units), and the sea adds eight timed pace increases over the selected voyage. Big breakers move toward the boat in finite-width bands and can be steered around. Collisions launch the deck crew and show impact effects plus large damage numbers. Stronger ocean heave is cosmetic and moves the ship with its visible surface. The snack roster now has twelve effects: Bubble Fruit, Chili Noodles, Anchor Biscuit, Rubber Jelly, Magnet Mint, Ghost Grape, Balloon Berry, Disco Donut, Banana Boat, Thunder Pop, Giant Dumpling, and Octopus Candy. Earlier baseline specifications below are superseded where this revision differs.

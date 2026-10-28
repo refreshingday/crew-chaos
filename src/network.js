@@ -1,8 +1,10 @@
 // Room reservation and host-star topology adapted from refreshingday/multiplayerTest:
 // room-v23.js, network-v23.js, and puff-river/room.js (inspected 27 Oct 2026).
 // PeerJS Cloud provides signaling only. No dedicated gameplay server is used.
-const PREFIX = 'crew-chaos-web-v2-';
-export const NETWORK_PROTOCOL = 2;
+// Islands are authoritative terrain in v3. Isolate cached older clients whose
+// renderers lack terrain and whose validators reject island collision impacts.
+const PREFIX = 'crew-chaos-web-v3-';
+export const NETWORK_PROTOCOL = 3;
 const PROTOCOL = NETWORK_PROTOCOL;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const COLORS = ['#ffb34d', '#56ded0', '#bd9cff', '#ff82aa'];
@@ -42,7 +44,9 @@ export function validSnapshot(state) {
       ids.add(p.id);
     }
     if (!Array.isArray(state.obstacles) || state.obstacles.length > 64 || !state.obstacles.every(o =>
-      finiteFields(o, ['x', 'z', 'radius']) && entityId(o.id) && text(o.type, 32) && o.radius > 0 && typeof o.active === 'boolean')) return false;
+      finiteFields(o, ['x', 'z', 'radius']) && entityId(o.id) && text(o.type, 32) && o.radius > 0 && typeof o.active === 'boolean' &&
+      (o.radiusZ === undefined || Number.isFinite(o.radiusZ) && o.radiusZ > 0) &&
+      (o.type !== 'island' || Number.isFinite(o.radiusZ) && o.radiusZ > 0))) return false;
     if (!Array.isArray(state.waves) || state.waves.length > 32 || !state.waves.every(w =>
       finiteFields(w, ['z', 'side', 'strength']) && entityId(w.id) && typeof w.hit === 'boolean' && text(w.kind, 32))) return false;
     if (!Array.isArray(state.events) || state.events.length > 16 || !state.events.every(e =>
@@ -50,9 +54,9 @@ export function validSnapshot(state) {
     if (!finiteFields(state.stats, ['rescues', 'crates', 'treasure', 'falls', 'perfectBraces'])) return false;
     if (state.impacts !== undefined && (!Array.isArray(state.impacts) || state.impacts.length > 16 || !state.impacts.every(i =>
       finiteFields(i, ['x', 'z', 'at', 'damage']) && entityId(i.id) &&
-      ['crate', 'wreck', 'whale', 'reef', 'thunder'].includes(i.kind) && typeof i.blocked === 'boolean'))) return false;
+      ['crate', 'wreck', 'whale', 'reef', 'island', 'thunder'].includes(i.kind) && typeof i.blocked === 'boolean'))) return false;
 
-    // Optional v2 fields and future cosmetic fields must still be finite, shallow JSON data.
+    // Optional fields and future cosmetic fields must still be finite, shallow JSON data.
     // This also rejects cyclic objects, undefined, typed arrays, and oversized nested payloads.
     let nodes = 0;
     const validValue = (value, depth = 0) => {

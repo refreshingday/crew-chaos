@@ -132,6 +132,9 @@ function demoState() {
     {id:103,type:'treasure',x:5,z:29,radius:1,active:true},
     {id:104,type:'wreck',x:14,z:45,radius:2.5,active:true},
     {id:105,type:'supply',x:-5,z:42,radius:1,active:true},
+    {id:106,type:'island',x:-29,z:26,radius:6.6,radiusZ:4.95,variant:1,active:true},
+    {id:107,type:'island',x:30,z:63,radius:8,radiusZ:6,variant:2,active:true},
+    {id:108,type:'island',x:-34,z:107,radius:9.4,radiusZ:7.05,variant:3,active:true},
   ];
   s.presentation = true;
   return s;
@@ -340,12 +343,13 @@ function updateHUD(s){
   $('active-addons').hidden=!active.length;
   if(activeHTML!==activeAddonsHTML){$('active-addons').innerHTML=activeHTML;activeAddonsHTML=activeHTML;}
   let tip=null;
-  if(s.time<7)tip=['↔','YOU ARE THE STEERING WHEEL',isTouch?'Move the joystick to shift your weight.':'WASD to move. Stand left or right to steer.'];
+  if(p?.state==='swim')tip=['!','SWIM BACK ABOARD','Swim close to any edge of the hull to climb up automatically.'];
+  else if(p?.state==='rescue')tip=['⚓','COMING ABOARD','Hold tight! You’re climbing back onto the deck.'];
+  else if(s.time<7)tip=['↔','YOU ARE THE STEERING WHEEL',isTouch?'Move the joystick to shift your weight.':'WASD to move. Stand left or right to steer.'];
   else if(s.time<14)tip=['≋','DODGE THE FOAM',isTouch?'Steer around moving waves, or hold Brace.':'Steer around a wave’s edge, or hold Space.'];
   else if(s.time<21)tip=['↕','BOW FAST. STERN SLOW.', 'Move forward to accelerate, back to slow down.'];
-  else if(s.time<29)tip=['⚓','NOBODY LEFT BEHIND',s.players.length===1?'Your automatic lifeline rescues you if you fall.':isTouch?'Move to a friend’s side. Hold Rescue.':'Move to a friend’s side. Hold E to rescue.'];
-  else if(p?.state==='swim')tip=['!','YOU’RE OVERBOARD',s.players.length===1?'Swim toward the boat. Your lifeline is coming.':'Swim toward the boat and call for help!'];
-  $('tutorial').hidden=!tip||!!wave;
+  else if(s.time<29)tip=['⚓','NOBODY LEFT BEHIND', 'Swim to any hull edge to climb aboard. Friends can also throw a lifeline.'];
+  $('tutorial').hidden=!tip||!!wave&&!['swim','rescue'].includes(p?.state);
   if(tip){$('tutorial').querySelector('.tutorial-icon').textContent=tip[0];$('tutorial').querySelector('strong').textContent=tip[1];$('tutorial').querySelector(':scope > div > span').textContent=tip[2];}
 }
 
@@ -470,13 +474,30 @@ if(import.meta.env.DEV){
   if(new URLSearchParams(location.search).has('qa')){
     const toolbar=document.createElement('aside');toolbar.className='qa-toolbar';toolbar.setAttribute('aria-label','Development visual checks');
     const title=document.createElement('b');title.textContent='VISUAL QA · LOCAL ONLY';toolbar.append(title);
-    let snackIndex=0;
+    let snackIndex=0, swimSide=0;
     const withGame=action=>()=>{if(screen!=='game'||online){toast('Start a solo voyage first.');return;}action(game);};
     const buttons=[
       ['Collision −15',withGame(g=>{
         g.collisionCooldown=0;for(const p of g.state.players){p.state='deck';p.y=1.8;p.invulnerable=0;p.brace=false;}
-        g.state.obstacles.push({id:`qa-hit-${performance.now()}`,type:'wreck',x:g.state.boat.x,z:g.state.boat.z,radius:2.5,active:true});
+        g.state.obstacles.push({id:g.nextId++,type:'wreck',x:g.state.boat.x,z:g.state.boat.z,radius:2.5,active:true});
         g.updateObstacles();g.update(.2,{});qaPaused=true;
+      })],
+      ['Island ahead',withGame(g=>{
+        g.state.obstacles=[{id:g.nextId++,type:'island',x:g.state.boat.x+9,z:g.state.boat.z+24,radius:7.2,radiusZ:5.4,active:true}];
+        g.state.waves=[];qaPaused=true;
+      })],
+      ['Island collision',withGame(g=>{
+        g.collisionCooldown=0;
+        for(const p of g.state.players){p.state='deck';p.y=1.8;p.invulnerable=0;p.brace=false;}
+        g.state.obstacles=[{id:g.nextId++,type:'island',x:g.state.boat.x+6,z:g.state.boat.z+2,radius:7.2,radiusZ:5.4,active:true}];
+        g.state.waves=[];g.updateObstacles();g.update(.2,{});qaPaused=true;
+      })],
+      ['Swim beside next edge',withGame(g=>{
+        const p=g.state.players[0],positions=[[5.5,0],[-5.5,0],[0,5],[0,-5.5]];
+        p.shield=0;p.effects.bubble=0;g.fallOverboard(p);
+        [p.x,p.z]=positions[swimSide++%positions.length];
+        g.state.obstacles=[];g.state.waves=[];g.nextChunk=g.nextWave=g.state.time+20;
+        qaPaused=true;
       })],
       ['Moving breaker',withGame(g=>{g.state.waves=[];g.spawnWave();for(let i=0;i<4;i++)g.update(.25,{});qaPaused=true;})],
       ['Eat next snack',withGame(g=>{const p=g.state.players[0];p.snack=ADDON_IDS[snackIndex++%ADDON_IDS.length];g.useSnack(p);})],

@@ -37,6 +37,7 @@ test('balanced crew cancels steering; overboard weight does not steer', () => {
   run(game, 1);
   assert.ok(Math.abs(game.state.boat.x) < .01);
   game.state.players[1].state = 'swim';
+  game.state.players[1].x = 6.5;
   game.state.players[1].swimTime = 10;
   run(game, 1);
   assert.ok(game.state.boat.x < -.5);
@@ -56,6 +57,7 @@ test('solo lifeline returns a swimmer and charges future failures to hull', () =
   const game = new Game({ seed: 7 });
   const p = game.state.players[0];
   game.state.buoys = 0;
+  p.x = 6.5; p.z = -6;
   game.fallOverboard(p);
   run(game, 4);
   assert.equal(p.state, 'deck');
@@ -66,7 +68,7 @@ test('solo lifeline returns a swimmer and charges future failures to hull', () =
 test('manual rescue requires matching rail and completes while held', () => {
   const game = new Game({ roster: [{ id: 'rescuer' }, { id: 'swimmer' }] });
   const [rescuer, swimmer] = game.state.players;
-  swimmer.x = 5;
+  swimmer.x = 6.2;
   game.fallOverboard(swimmer);
   rescuer.x = -3;
   run(game, .5, { rescuer: { interact: true } });
@@ -160,7 +162,7 @@ test('ordinary navigation and timed bracing can finish seeded 180-second voyages
 
 test('one emergency buoy recovers the whole overboard crew', () => {
   const game = new Game({ roster: ['a', 'b', 'c', 'd'].map(id => ({ id })) });
-  game.state.players.forEach(p => game.fallOverboard(p));
+  game.state.players.forEach(p => { p.x = 6.5; p.z = -6; game.fallOverboard(p); });
   run(game, 3.2);
   assert.equal(game.state.buoys, 1);
   assert.ok(game.state.players.every(p => p.state === 'rescue'));
@@ -172,7 +174,7 @@ test('one emergency buoy recovers the whole overboard crew', () => {
 test('a crew wipe with no buoy has a grace period then ends the voyage', () => {
   const game = new Game({ roster: [{ id: 'a' }, { id: 'b' }] });
   game.state.buoys = 0;
-  game.state.players.forEach(p => game.fallOverboard(p));
+  game.state.players.forEach(p => { p.x = 6.5; p.z = -6; game.fallOverboard(p); });
   run(game, 6);
   assert.equal(game.state.phase, 'playing');
   run(game, 1.2);
@@ -192,7 +194,7 @@ test('an airborne crew is not treated as a wipe before landing', () => {
 test('an interrupted lifeline resumes the swim timer and preserves partial progress briefly', () => {
   const game = new Game({ roster: [{ id: 'a' }, { id: 'b' }] });
   const [rescuer, swimmer] = game.state.players;
-  rescuer.x = 2.5; swimmer.x = 5;
+  rescuer.x = 2.5; swimmer.x = 6.3;
   game.fallOverboard(swimmer);
   run(game, .5, { a: { interact: true } });
   const progress = swimmer.rescueProgress;
@@ -454,4 +456,132 @@ test('rescue intent takes precedence over a snack and holding interact does not 
   game.update(1 / 60, { a: { interact: true } });
   assert.equal(rescuer.snack, null);
   assert.ok(game.state.boat.effects.ghost > 0);
+});
+
+test('swimmers climb aboard from both rails, the bow, and the stern without a rescue button or cost', () => {
+  const edges = [[-4.8, 0], [4.8, 0], [0, 4.5], [0, -3.6], [3.55, 3.2]];
+  for (const [x, z] of edges) {
+    const game = quietGame({ roster: [{ id: 'a' }, { id: 'b' }] });
+    const p = game.state.players[1];
+    p.x = x; p.z = z;
+    game.fallOverboard(p);
+    run(game, .2);
+    assert.equal(p.state, 'rescue', `climb should start at ${x},${z}`);
+    assert.equal(p.boarding, true);
+    assert.ok(p.y >= .25 && p.y < GAME_CONSTANTS.DECK_Y);
+    run(game, .5);
+    assert.equal(p.state, 'deck', `climb should complete at ${x},${z}`);
+    assert.equal(p.y, GAME_CONSTANTS.DECK_Y);
+    assert.ok(Math.abs(p.x) <= GAME_CONSTANTS.DECK_X);
+    assert.ok(Math.abs(p.z) <= GAME_CONSTANTS.DECK_Z);
+    if (Math.abs(x) > 4) assert.equal(Math.sign(p.x), Math.sign(x));
+    if (Math.abs(z) > 3.5) assert.equal(Math.sign(p.z), Math.sign(z));
+    assert.equal(game.state.buoys, 2);
+    assert.equal(game.state.hull, 100);
+    assert.equal(game.state.score, 0);
+    assert.equal(game.state.stats.rescues, 0);
+    assert.equal(p.boarding, false);
+  }
+});
+
+test('distant swimmers must reach the actual hull rather than an invisible rectangle or ladder point', () => {
+  for (const [x, z] of [[6.5, 0], [0, -6], [5, 4.5]]) {
+    const game = quietGame({ roster: [{ id: 'a' }, { id: 'b' }] });
+    const p = game.state.players[1];
+    p.x = x; p.z = z; game.fallOverboard(p);
+    run(game, .8);
+    assert.equal(p.state, 'swim', `distant swimmer ${x},${z} must not teleport aboard`);
+    assert.equal(p.boarding, false);
+  }
+  const game = quietGame({ roster: [{ id: 'a' }, { id: 'b' }] });
+  const p = game.state.players[1];
+  p.x = 6.5; p.z = .8; game.fallOverboard(p);
+  run(game, 1.7, { b: { x: -1 } });
+  assert.equal(p.state, 'deck');
+  assert.ok(p.x > 0, 'swimmer climbs onto the rail they reached');
+  assert.equal(game.state.buoys, 2);
+});
+
+test('the whole crew can climb aboard near the wipe deadline without an emergency buoy interrupting them', () => {
+  const game = quietGame({ roster: [{ id: 'a' }, { id: 'b' }] });
+  game.state.score = 500;
+  for (const p of game.state.players) { p.x = 8; p.z = 0; game.fallOverboard(p); }
+  for (let i = 0; i < 80; i++) game.update(1 / 60);
+  for (let i = 0; i < 90; i++) game.update(1 / 60, { a: { x: -1 }, b: { x: -1 } });
+  assert.ok(game.state.players.every(p => p.state === 'rescue' && p.boarding));
+  assert.equal(game.state.wipeTime, 0);
+  run(game, .6);
+  assert.ok(game.state.players.every(p => p.state === 'deck'));
+  assert.equal(game.state.buoys, 2);
+  assert.equal(game.state.score, 500);
+  assert.equal(game.state.hull, 100);
+});
+
+test('authoritative islands collide at the bow and a glancing rail, while an ellipse corner miss stays clear', () => {
+  for (const [x, z, hit] of [[0, 7.7, true], [8.7, 0, true], [9.8, 0, false], [8.5, 6.5, false]]) {
+    const game = quietGame();
+    game.spawnIsland(x, z, 0);
+    const island = game.state.obstacles[0];
+    game.updateObstacles();
+    assert.equal(game.state.hull, hit ? 82 : 100, `island ${x},${z}`);
+    assert.equal(island.active, true, 'land must not vanish on impact');
+    assert.equal(game.state.impacts.length, hit ? 1 : 0);
+    if (hit) {
+      assert.equal(game.state.impacts[0].kind, 'island');
+      assert.equal(game.state.impacts[0].damage, 18);
+      assert.equal(game.state.players[0].state, 'air');
+      assert.ok(Math.hypot(game.state.boat.x, game.state.boat.z) > .1, 'the shore separates the hull instead of allowing overlap');
+    }
+  }
+});
+
+test('island contact is latched until the ship separates and can be damaged again on a later approach', () => {
+  const game = quietGame();
+  game.spawnIsland(0, 7.7, 0);
+  const island = game.state.obstacles[0];
+  game.updateObstacles();
+  game.collisionCooldown = 0;
+  for (let i = 0; i < 10; i++) {
+    game.state.boat.z = 0; // continuing thrust against the same shoreline
+    game.updateObstacles();
+  }
+  assert.equal(game.state.hull, 82);
+  assert.equal(game.state.impacts.length, 1);
+  game.state.boat.x = -30;
+  game.updateObstacles();
+  assert.equal(island.touching, false);
+  game.state.boat.x = 0; game.state.boat.z = 0;
+  game.updateObstacles();
+  assert.equal(game.state.hull, 64);
+  assert.equal(game.state.impacts.length, 2);
+});
+
+test('ghost can cross an island, while thunder cannot erase solid land', () => {
+  const game = quietGame();
+  game.spawnIsland(0, 7.7, 0);
+  const island = game.state.obstacles[0];
+  eat(game, 'ghost');
+  game.updateObstacles();
+  assert.equal(game.state.hull, 100);
+  assert.equal(game.state.boat.z, 0);
+  assert.equal(island.active, true);
+  assert.equal(game.state.impacts[0].blocked, true);
+  assert.equal(game.state.impacts[0].kind, 'island');
+  eat(game, 'thunder');
+  assert.equal(island.active, true);
+  assert.equal(game.state.score, 0);
+});
+
+test('islands begin ahead of the ship and new shores follow an unlimited route without blocking its reward lane', () => {
+  const game = new Game({ seed: 44 });
+  const initial = game.state.obstacles.filter(o => o.type === 'island');
+  assert.equal(initial.length, 8);
+  assert.ok(initial.every(o => o.z > 20 && Math.abs(o.x) > o.radius + 15));
+  for (const x of [-5000, 2500]) {
+    game.state.boat.x = x;
+    game.spawnChunk(); game.spawnChunk();
+    const shore = game.state.obstacles.filter(o => o.type === 'island').at(-1);
+    assert.ok(Math.abs(shore.x - x) >= 31 && Math.abs(shore.x - x) <= 47);
+    assert.equal(shore.radiusZ, shore.radius * .75);
+  }
 });

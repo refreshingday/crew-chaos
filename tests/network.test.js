@@ -148,13 +148,13 @@ test('disconnect updates every roster and host departure ends guest session', as
 test('missing room fails promptly and cleanup releases reservations', async () => using(2, async ([host, guest]) => {
   await assert.rejects(guest.join('ZZZZ'), /Room not found/);
   const room = await host.host();
-  assert.ok(MockPeer.registry.has('crew-chaos-web-v2-' + room));
+  assert.ok(MockPeer.registry.has('crew-chaos-web-v3-' + room));
   const s = host.session; host.leave();
   assert.equal(s.timers.size, 0); assert.equal(s.cancels.size, 0);
-  assert.ok(!MockPeer.registry.has('crew-chaos-web-v2-' + room));
+  assert.ok(!MockPeer.registry.has('crew-chaos-web-v3-' + room));
 }));
 
-test('v2 snapshots support open-ocean coordinates, moving waves, effects and bounded impacts', () => {
+test('v3 snapshots support open-ocean coordinates, moving waves, effects and bounded impacts', () => {
   const s = snapshot();
   s.boat.x = -15_000; s.boat.z = 50_000; s.boat.speed = 38.5;
   s.boat.trim = .8; s.boat.targetSpeed = 40; s.boat.speedTier = 3;
@@ -166,6 +166,17 @@ test('v2 snapshots support open-ocean coordinates, moving waves, effects and bou
   s.impacts = Array.from({ length: 16 }, (_, i) => ({ id: i, x: -15_000, z: 50_000, at: i, damage: i, kind: 'thunder', blocked: i % 2 === 0 }));
   assert.equal(validSnapshot(s), true);
   assert.ok(new TextEncoder().encode(JSON.stringify(s)).byteLength < 60_000);
+});
+
+test('island snapshots retain their elliptical collision footprint and impact', () => {
+  const s = snapshot();
+  s.obstacles = [{ id: 123, type: 'island', x: 500, z: 100, radius: 9.4, radiusZ: 7.05, active: true }];
+  s.impacts = [{ id: 124, x: 493, z: 100, at: s.time, damage: 18, kind: 'island', blocked: false }];
+  assert.equal(validSnapshot(s), true);
+  for (const radiusZ of [undefined, 0, -2, Infinity, '7.05']) {
+    s.obstacles[0].radiusZ = radiusZ;
+    assert.equal(validSnapshot(s), false, `invalid island length ${String(radiusZ)}`);
+  }
 });
 
 test('malformed snapshots are ignored without consuming their sequence number', async () => using(2, async ([host, guest]) => {
@@ -200,12 +211,12 @@ test('snapshot validation rejects malformed structures, non-finite numbers and o
   assert.equal(validSnapshot([]), false);
 });
 
-test('previous protocol packets cannot control or update a v2 room', async () => using(2, async ([host, guest]) => {
+test('previous protocol packets cannot control or update a v3 room', async () => using(2, async ([host, guest]) => {
   const room = await host.host(); await guest.join(room); host.startGame({}); await flush();
   let inputs = 0, updates = 0;
   host.addEventListener('input', () => inputs++); guest.addEventListener('snapshot', () => updates++);
-  guest.session.links.get('host').connection.send({ v: 1, type: 'input', run: 1, seq: 1, input: { x: 1 } });
-  [...host.session.links.values()][0].connection.send({ v: 1, type: 'snapshot', run: 1, seq: 1, state: snapshot() });
+  guest.session.links.get('host').connection.send({ v: 2, type: 'input', run: 1, seq: 1, input: { x: 1 } });
+  [...host.session.links.values()][0].connection.send({ v: 2, type: 'snapshot', run: 1, seq: 1, state: snapshot() });
   await flush(); assert.equal(inputs, 0); assert.equal(updates, 0);
 }));
 
@@ -270,3 +281,51 @@ test('actual final-tier defeat remains a valid guest snapshot', () => {
   assert.equal(game.state.phase, 'lost');
   assert.equal(validSnapshot(game.snapshot()), true);
 });
+
+test('actual island collision and automatic climbing snapshots reach a guest', async () => using(2, async ([host, guest]) => {
+  const room = await host.host('Captain');
+  await guest.join(room, 'Swimmer');
+  const config = { seed: 97, duration: 180, roster: host.roster };
+  const game = new Game(config);
+  host.startGame(config); await flush();
+  const received = [];
+  guest.addEventListener('snapshot', event => received.push(event.detail));
+  const sendActualState = async () => {
+    const state = game.snapshot();
+    assert.equal(validSnapshot(state), true);
+    host.broadcast(state); await flush();
+    assert.deepEqual(received.at(-1), state);
+  };
+
+  // Place an authoritative island under the ship, then use the production
+  // collision path: terrain persists while damage and launches replicate.
+  const island = { id: game.nextId++, type: 'island', x: 0, z: 0, radius: 5.2, radiusZ: 3.9, active: true };
+  game.state.obstacles = [island];
+  game.updateObstacles();
+  assert.equal(game.state.hull, 82);
+  assert.equal(island.active, true);
+  assert.equal(game.state.impacts.at(-1).kind, 'island');
+  await sendActualState();
+
+  // The guest swims to an ordinary section of the starboard hull. No deck
+  // rescuer presses Interact; boarding is a host-authoritative transition.
+  const captain = game.state.players.find(p => p.id === host.localId);
+  captain.state = 'deck'; captain.x = 0; captain.y = 1.8; captain.vx = captain.vy = captain.vz = 0;
+  const swimmer = game.state.players.find(p => p.id === guest.localId);
+  game.fallOverboard(swimmer);
+  swimmer.x = 4.5; swimmer.z = 1;
+  const buoys = game.state.buoys, score = game.state.score;
+  game.update(.2, {});
+  assert.equal(swimmer.state, 'rescue');
+  assert.equal(swimmer.boarding, true);
+  assert.equal(swimmer.automaticRescue, true);
+  await sendActualState();
+  for (let i = 0; i < 3; i++) game.update(.2, {});
+  assert.equal(swimmer.state, 'deck');
+  assert.equal(game.state.buoys, buoys);
+  assert.equal(game.state.score, score);
+  await sendActualState();
+  assert.equal(received.length, 3);
+  assert.equal(received[1].players.find(p => p.id === guest.localId).boarding, true);
+  assert.equal(received[2].players.find(p => p.id === guest.localId).state, 'deck');
+}));

@@ -47,7 +47,11 @@ Stand left or right to turn across an ocean with no sideways limit. Obstacles sp
 
 Big breakers visibly travel toward the boat in finite-width bands. Steer outside their foamy edges to dodge, or brace if you cross them. Unbraced waves can throw sailors into the air and sea. Obstacle collisions launch every sailor currently on deck, with a smaller jump while braced, plus an impact burst and large damage number. The rolling sea and matching ship rise/fall are cosmetic and do not add hidden launch forces.
 
-Move to the same side as a swimmer and hold rescue. Solo sailors have an automatic lifeline. Emergency recovery consumes buoys, then hull.
+The stylized ocean uses displaced curved swells, matching surface normals, deep blue troughs, turquoise faces, broken crest foam and view-dependent highlights. Astra created the sea art pass; [research and rendering notes](docs/OCEAN_RENDERING.md) describe the references and mobile tradeoffs.
+
+Islands have solid elliptical shores that match their visible footprint. A collision damages the hull and launches the crew; the island remains in place. Ghost Grape can phase through islands.
+
+Swim close to any part of the hull—either side, bow, or stern—to climb aboard automatically, with no button, buoy, or score cost. A friend can still move to your side and hold rescue to pull you from farther away. Solo sailors retain their backup lifeline; emergency recovery consumes buoys, then hull.
 
 Collect treasure for score, repair crates for hull, and twelve strange snacks. One snack can be held; use it with E or Use when you are not rescuing. Active effects have visible timers, and the in-game briefing contains the full snack galley.
 
