@@ -23,6 +23,10 @@ Visible tropical islands now have authoritative elliptical collision shapes. Sho
 
 Astra’s revised sea uses stronger curved geometric swells, analytic surface normals, dark blue troughs, turquoise crests, broken white foam and view-dependent sun highlights. Ship heave and tilt follow that visible surface; cosmetic swells do not launch sailors. See [ocean rendering research](OCEAN_RENDERING.md) for the technical references.
 
+### Rough seas revision
+
+Cruising speed increases continuously from 13 to 27, with bow/stern trim of up to 4 and bounds 9-31. Encounters contain 2-4 hazards and accelerate to 2.9-second gaps. Breakers widen to 18-24 units, move faster, recur more frequently, and launch unbraced crew more strongly. Curled wave art and synchronized splash hit effects replace the earlier presentation. These values supersede earlier tuning below.
+
 ## 1. High concept
 
 **Playable revision:** Ship steering is now unlimited horizontally, with encounters generated around the moving route. Bow/stern crew placement controls forward speed (minimum 6.5, maximum 22 gameplay units), and the sea adds eight timed pace increases over the selected voyage. Big breakers move toward the boat in finite-width bands and can be steered around. Collisions launch the deck crew and show impact effects plus large damage numbers. Stronger ocean heave is cosmetic and moves the ship with its visible surface. The snack roster now has twelve effects: Bubble Fruit, Chili Noodles, Anchor Biscuit, Rubber Jelly, Magnet Mint, Ghost Grape, Balloon Berry, Disco Donut, Banana Boat, Thunder Pop, Giant Dumpling, and Octopus Candy. Earlier baseline specifications below are superseded where this revision differs.

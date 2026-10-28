@@ -71,9 +71,9 @@ export class Game {
     this.state = {
       phase: 'playing', time: 0, duration: clamp(Number(duration) || 180, 30, 240), seed,
       difficulty, hull: 100, score: 0, buoys: 2, storm: 0, wipeTime: 0,
-      boat: { x: 0, z: 0, vx: 0, roll: 0, steer: 0, trim: 0, speed: 10,
-        targetSpeed: 10, speedTier: 0, effects: { ghost: 0, magnet: 0, disco: 0, octopus: 0, thunder: 0 } },
-      pace: { tier: 0, baseSpeed: 10, nextAt: clamp(Number(duration) || 180, 30, 240) / 9 },
+      boat: { x: 0, z: 0, vx: 0, roll: 0, steer: 0, trim: 0, speed: 13,
+        targetSpeed: 13, speedTier: 0, effects: { ghost: 0, magnet: 0, disco: 0, octopus: 0, thunder: 0 } },
+      pace: { tier: 0, baseSpeed: 13, nextAt: clamp(Number(duration) || 180, 30, 240) / 9 },
       players: members.map((p, i) => ({
         id: String(p.id), name: String(p.name || `Sailor ${i + 1}`).slice(0, 18), color: p.color || COLORS[i],
         x: (i - (members.length - 1) / 2) * 1.35, z: i % 2 ? -.55 : .55, y: DECK_Y,
@@ -152,9 +152,9 @@ export class Game {
     const routeX = s.boat.x + clamp(s.boat.vx, -7.8, 7.8) * 4;
     const safeLane = routeX + [-12, -6, 0, 6, 12][Math.floor(this.random() * 5)];
     const z = s.boat.z + s.boat.speed * (6.6 + this.random() * .8);
-    const first = s.time < 15;
+    const first = s.time < 8;
     const recovery = s.time > s.duration * .5 && s.time < s.duration * .59;
-    const hazardCount = first || recovery ? 1 : gentle ? 2 : progress > .6 ? 3 : 2;
+    const hazardCount = recovery ? 2 : gentle ? 2 : first ? 2 : progress > .5 ? 4 : 3;
     const candidates = [-15, -7.5, 0, 7.5, 15].map(x => x + routeX).filter(x => Math.abs(x - safeLane) > 6.5);
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = Math.floor(this.random() * (i + 1));
@@ -182,21 +182,21 @@ export class Game {
       const side = this.chunkCount % 4 ? 1 : -1;
       this.spawnIsland(routeX + side * (31 + this.random() * 16), z + 18);
     }
-    this.nextChunk = s.time + (recovery ? 7 : gentle ? 7 : progress > .7 ? 4.8 : 6.2);
+    this.nextChunk = s.time + (recovery ? 4.8 : gentle ? 6 : progress > .65 ? 2.9 : 4.1);
   }
 
   spawnWave() {
     const s = this.state;
-    const warning = s.difficulty === 'relaxed' ? 4.6 : 3.8 + this.random() * .5;
-    const speed = 7 + this.random() * 3;
+    const warning = s.difficulty === 'relaxed' ? 4.6 : 3.3 + this.random() * .4;
+    const speed = 10 + this.random() * 3;
     s.waves.push({ id: this.nextId++, x: s.boat.x + clamp(s.boat.vx, -7.8, 7.8) * 2 + (this.random() - .5) * 10,
-      z: s.boat.z + (s.boat.speed + speed) * warning, width: 10 + this.random() * 8,
+      z: s.boat.z + (s.boat.speed + speed) * warning, width: 18 + this.random() * 6,
       speed, hit: false, passed: false, dodged: false, kind: 'breaker', side: 0,
-      strength: s.difficulty === 'relaxed' ? .8 : 1, at: s.time,
+      strength: s.difficulty === 'relaxed' ? .8 : 1.12, at: s.time,
     });
     this.event('BIG WAVE APPROACHING — steer around it or hold BRACE!', 'wave');
     const recovery = s.time > s.duration * .5 && s.time < s.duration * .59;
-    this.nextWave = s.time + (recovery ? 17 : s.time > s.duration * .72 ? 10 : 14) + this.random() * 4;
+    this.nextWave = s.time + (recovery ? 12 : s.time > s.duration * .65 ? 7 : 10) + this.random() * 2;
   }
 
   update(dt, inputs = {}) {
@@ -220,7 +220,7 @@ export class Game {
     const tier = Math.min(8, Math.floor(s.time / (s.duration / 9)));
     if (tier > s.boat.speedTier) this.event(`TIDE RISING! Speed level ${tier + 1} — move aft to slow down.`, 'pace');
     s.boat.speedTier = tier;
-    s.pace = { tier, baseSpeed: 10 + tier * 1.25, nextAt: tier < 8 ? (tier + 1) * s.duration / 9 : null };
+    s.pace = { tier, baseSpeed: 13 + 14 * clamp(s.time / s.duration, 0, 1), nextAt: tier < 8 ? (tier + 1) * s.duration / 9 : null };
     if (s.time >= this.nextChunk && s.time < s.duration - 7) this.spawnChunk();
     if (s.time >= this.nextWave && s.time < s.duration - 4) this.spawnWave();
     if (!this.finale && s.time > s.duration - 30) {
@@ -240,7 +240,7 @@ export class Game {
 
     const steer = s.players.reduce((sum, p) => sum + (p.state === 'deck' ? p.x / DECK_X * (p.effects.giant > 0 ? 1.7 : 1) : 0), 0) / Math.max(1, s.players.length);
     s.boat.trim = s.players.reduce((sum, p) => sum + (p.state === 'deck' ? p.z / DECK_Z : 0), 0) / Math.max(1, s.players.length);
-    s.boat.targetSpeed = clamp(s.pace.baseSpeed + s.boat.trim * 3.5, 6.5, 22);
+    s.boat.targetSpeed = clamp(s.pace.baseSpeed + s.boat.trim * 4, 9, 31);
     s.boat.speed = approach(s.boat.speed, s.boat.targetSpeed, 1.25, dt);
     s.boat.steer = approach(s.boat.steer, Math.abs(steer) < .065 ? 0 : steer, 7, dt);
     s.boat.vx = approach(s.boat.vx, s.boat.steer * 7.8, 3, dt);
@@ -364,6 +364,8 @@ export class Game {
 
   hitWave(wave) {
     const s = this.state;
+    const protectedCrew = s.boat.effects.octopus > 0 || s.players.every(p => p.state !== 'deck' || p.brace || p.anchor > 0 || p.invulnerable > 0);
+    this.impact('wave', s.boat.x, s.boat.z + 1, 0, protectedCrew);
     let protectedCount = 0;
     let flying = 0;
     if (s.boat.effects.octopus > 0) {

@@ -43,7 +43,7 @@ Choose a two-, three-, or four-minute voyage. Survive until the lighthouse with 
 | Call for help | Q | ! button | North button |
 | Instructions / solo pause | Escape or ? | ? | — |
 
-Stand left or right to turn across an ocean with no sideways limit. Obstacles spawn around the boat’s current route. Stand at the bow to accelerate, or at the stern to slow down; the boat always maintains a minimum forward speed. Every 20 seconds in the standard three-minute voyage, the underlying cruising speed increases. Shorter and longer voyages scale that schedule proportionally. The speed display shows actual speed, trim direction, and the current pace level.
+Stand left or right to turn across an ocean with no sideways limit. Obstacles spawn around the boat’s current route. Stand at the bow to accelerate, or at the stern to slow down; the boat always maintains a minimum forward speed. Cruising speed rises continuously from 13 to 27 over the voyage; bow/stern trim adds or subtracts up to 4, with a minimum of 9 and maximum of 31. Pace announcements still mark nine stages. Shorter and longer voyages scale the ramp proportionally. The speed display shows actual speed, trim direction, and the current pace level.
 
 Big breakers visibly travel toward the boat in finite-width bands. Steer outside their foamy edges to dodge, or brace if you cross them. Unbraced waves can throw sailors into the air and sea. Obstacle collisions launch every sailor currently on deck, with a smaller jump while braced, plus an impact burst and large damage number. The rolling sea and matching ship rise/fall are cosmetic and do not add hidden launch forces.
 
@@ -101,3 +101,8 @@ Automated tests cover seeded encounters, steering, braces, recovery, snacks, col
 Mocked network tests do not prove carrier compatibility. Local real-browser tests and their exact scope are recorded in `docs/VALIDATION.md`. Physical phone performance and cross-carrier NAT behavior still need device testing before a production release.
 
 The game itself has no account, analytics, or purchase system. The public GitHub Pages game requires no sign-in. An earlier private Sites preview requires its owner’s ChatGPT sign-in; the downloadable static build can also be placed on other HTTPS hosting. Optional fonts load from Google Fonts; system fallbacks are provided. All 3D meshes and effects are generated locally in the browser.
+
+
+### Rough seas update
+
+Normal voyages spawn 2-4 hazards per encounter, with gaps shrinking from 4.1 to 2.9 seconds. Breakers span 18-24 units, close at 10-13 units per second plus ship speed, and arrive more often with 3.3-3.7 seconds of warning. Bracing prevents launches. Astra rebuilt their curling shape, foam lip and spray. Wave hits emit synchronized cyan splash rings and droplets, a cool flash and camera jolt; protected hits use gentler feedback.

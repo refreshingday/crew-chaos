@@ -133,7 +133,8 @@ test('disconnect removes steering influence and clears rescue references', () =>
   assert.equal(game.state.players[0].rescueTarget, null);
 });
 
-test('ordinary navigation and timed bracing can finish seeded 180-second voyages with 1–4 players', () => {
+test('harder seeded voyages remain winnable and end cleanly for all crew sizes', () => {
+  let wins = 0, losses = 0;
   for (const count of [1, 2, 3, 4]) for (const seed of [1, 7, 13, 37, 57]) {
     const roster = Array.from({ length: count }, (_, i) => ({ id: String(i) }));
     const game = new Game({ seed, duration: 180, roster });
@@ -153,11 +154,12 @@ test('ordinary navigation and timed bracing can finish seeded 180-second voyages
       game.update(1 / 60, inputs);
       if (frame % 600 === 0) assertFiniteSnapshot(game.snapshot());
     }
-    assert.equal(game.state.phase, 'won', `crew=${count}, seed=${seed}`);
-    assert.equal(game.state.time, 180);
-    assert.ok(game.state.hull > 0);
+    assert.ok(['won','lost'].includes(game.state.phase), `crew=${count}, seed=${seed}`);
+    if (game.state.phase === 'won') { wins++; assert.equal(game.state.time, 180); assert.ok(game.state.hull > 0); }
+    else { losses++; assert.ok(game.state.hull === 0 || game.state.wipeTime > 7, 'defeat has a gameplay cause'); }
     assertFiniteSnapshot(game.snapshot());
   }
+  assert.ok(wins > 0 && losses > 0, 'the harder benchmark is winnable but punishes some routes');
 });
 
 test('one emergency buoy recovers the whole overboard crew', () => {
@@ -288,9 +290,9 @@ test('generated waves have finite width and preserve an actionable closing-time 
   game.spawnWave();
   const wave = game.state.waves[0];
   const warning = (wave.z - game.state.boat.z) / (wave.speed + game.state.boat.speed);
-  assert.ok(wave.width >= 10 && wave.width <= 18);
-  assert.ok(wave.speed >= 7 && wave.speed <= 10);
-  assert.ok(warning >= 3.8 && warning <= 4.3);
+  assert.ok(wave.width >= 18 && wave.width <= 24);
+  assert.ok(wave.speed >= 10 && wave.speed <= 13);
+  assert.ok(warning >= 3.3 && warning <= 3.7);
   assert.equal(wave.kind, 'breaker');
   assert.equal(wave.side, 0);
 });
@@ -303,7 +305,7 @@ test('front and rear crew trim change forward speed without stopping or reversin
   run(forward, 5);
   run(aft, 5);
   assert.ok(forward.state.boat.speed > 13);
-  assert.ok(aft.state.boat.speed >= 6.5 && aft.state.boat.speed < 7);
+  assert.ok(aft.state.boat.speed >= 9 && aft.state.boat.speed < 10);
   assert.equal(forward.state.boat.trim, 1);
   assert.equal(aft.state.boat.trim, -1);
   assert.ok(forward.state.boat.z > aft.state.boat.z);
@@ -313,14 +315,14 @@ test('scheduled tide tiers increase speed through the voyage while trim remains 
   const game = quietGame({ duration: 180 });
   run(game, 20.1);
   assert.equal(game.state.boat.speedTier, 1);
-  assert.equal(game.state.pace.baseSpeed, 11.25);
+  assert.ok(game.state.pace.baseSpeed > 14.5);
   assert.equal(game.state.pace.nextAt, 40);
   game.state.time = 160;
   game.state.players[0].z = GAME_CONSTANTS.DECK_Z;
   run(game, 5);
   assert.equal(game.state.boat.speedTier, 8);
   assert.equal(game.state.pace.nextAt, null);
-  assert.ok(game.state.boat.speed > 21 && game.state.boat.speed <= 22);
+  assert.ok(game.state.boat.speed > 28 && game.state.boat.speed <= 31);
   assert.ok(game.state.events.some(e => e.kind === 'pace'));
 });
 
@@ -583,5 +585,31 @@ test('islands begin ahead of the ship and new shores follow an unlimited route w
     const shore = game.state.obstacles.filter(o => o.type === 'island').at(-1);
     assert.ok(Math.abs(shore.x - x) >= 31 && Math.abs(shore.x - x) <= 47);
     assert.equal(shore.radiusZ, shore.radius * .75);
+  }
+});
+
+
+test('cruise speed rises continuously inside a pace tier, and late encounters are denser', () => {
+  const game = quietGame();
+  run(game, 2); const early = game.state.boat.speed;
+  run(game, 12); assert.ok(game.state.boat.speed > early + .7);
+  assert.equal(game.state.boat.speedTier, 0);
+  game.state.time = 145; run(game, 4);
+  assert.ok(game.state.boat.speed > 24);
+  game.state.obstacles = []; game.spawnChunk();
+  const hazards = game.state.obstacles.filter(o => ['crate','wreck','whale','reef'].includes(o.type));
+  assert.ok(hazards.length >= 3);
+  assert.ok(game.nextChunk - game.state.time <= 2.9 + .001);
+});
+
+test('wave hit emits one replicated splash, including protected hits without hull damage', () => {
+  for (const brace of [false,true]) {
+    const game = quietGame(); const p = game.state.players[0]; p.invulnerable=0;p.brace=brace;
+    game.hitWave({strength:1.12,side:0});
+    assert.equal(game.state.impacts.length,1);
+    assert.equal(game.state.impacts[0].kind,'wave');
+    assert.equal(game.state.impacts[0].blocked,brace);
+    assert.equal(game.state.hull,100);
+    assert.equal(p.state,brace?'deck':'air');
   }
 });

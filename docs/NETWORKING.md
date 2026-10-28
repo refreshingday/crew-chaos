@@ -6,7 +6,7 @@ The implementation follows the user's existing [multiplayerTest](https://github.
 
 Crew Chaos is a static HTML/JavaScript game. It does not need an application backend or dedicated game server. One player's browser is the authoritative host. Three guests connect to that browser and send movement, brace, and interaction inputs. The host sends world snapshots; guests never submit ship positions, hull values, or game outcomes.
 
-Four-character room codes are registered as PeerJS IDs under the `crew-chaos-web-v3-` namespace. [PeerJS Cloud](https://peerjs.com/server/getting-started) is the public signaling service that lets browsers find each other and exchange WebRTC connection information. Browsers also contact Google's public STUN servers to discover their public network routes. Internet access is needed for joining, even when players share Wi-Fi. These third-party services are outside the game's control.
+Four-character room codes are registered as PeerJS IDs under the `crew-chaos-web-v4-` namespace. [PeerJS Cloud](https://peerjs.com/server/getting-started) is the public signaling service that lets browsers find each other and exchange WebRTC connection information. Browsers also contact Google's public STUN servers to discover their public network routes. Internet access is needed for joining, even when players share Wi-Fi. These third-party services are outside the game's control.
 
 Gameplay normally travels directly over encrypted WebRTC data channels. The default Crew Chaos configuration contains STUN only; it does **not** include the previous project's public demo TURN credentials. Consequently, some mobile carrier, enterprise, VPN, or symmetric-NAT network combinations may not connect directly. Try the same Wi-Fi network when a room is found but the game connection fails. There is no promise that all internet network combinations work without a relay.
 
@@ -16,7 +16,7 @@ A completely infrastructure-free room lookup cannot be implemented with only fou
 
 ## Session behavior
 
-The solid-island update uses protocol 3 and a separate room namespace. Reload both host and guest after updating; cached older clients cannot join the new rooms. Guest snapshots validate finite world coordinates, island footprints and impacts, player/boat effects, moving wave state, and the terminal pace tier before rendering.
+The rough-seas update uses protocol 4 and a separate room namespace. Reload both host and guest after updating; cached older clients cannot join the new rooms. Guest snapshots validate finite world coordinates, island footprints, wave-hit impacts, player/boat effects, moving wave state, and the terminal pace tier before rendering.
 
 - Room codes contain four uppercase letters/digits. Generated codes avoid visually ambiguous characters; entered codes are case-insensitive.
 - Room reservations retry collisions. Up to four sailors, including the host, can connect.

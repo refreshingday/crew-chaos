@@ -4,7 +4,7 @@ Build date: 28 October 2026.
 
 ## Automated checks
 
-- `npm test`: 55 passing tests (38 gameplay, 17 networking/integration).
+- `npm test`: 58 passing tests (40 gameplay, 18 networking/integration).
 - `npm run build`: successful static production build.
 - An additional simulation review exercised 240 full voyages: 20 seeds × 1–4 players × three input strategies. Ordinary navigation toward clear lanes plus timely bracing finished 80/80 voyages; idle crews failed 80/80. These are simulated strategies, not human usability results.
 
@@ -50,3 +50,11 @@ The real multiplayer test used separate browser peers on the same computer/netwo
 - Long-running public signaling availability.
 
 No broad hardware-performance or all-networks connectivity claim has been established.
+
+
+## Rough seas update
+
+- Continuous speed ramp, denser late encounters, larger finite-width breakers, warning time, and wave-hit events (including braced hits) have regression coverage. Protocol 4 validates wave impacts on guests and isolates cached older clients.
+- The old ordinary-navigation controller now wins 9/20 standard voyages; 11/20 fail between 155 and 169 seconds. This supersedes the easier build success rate. These are simulated results, not human difficulty measurements. The full-run test now checks valid victory/defeat outcomes and finite state rather than requiring this controller to win every harder voyage.
+
+- Desktop and 390x844 touch-layout browser checks inspected the final larger dark turquoise curling breaker, white lip, spray, and waterline foam. A real wave-hit fixture launched the sailor and displayed cyan splash rings/droplets without a false hull-damage number. Console error logs were empty. Reduced-motion branches disable wave flash and shake; physical phone performance remains unmeasured.

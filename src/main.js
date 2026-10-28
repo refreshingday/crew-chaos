@@ -357,7 +357,7 @@ function renderDamageNumbers(s){
   const live=new Set();
   for(const hit of s.impacts||[]){
     const age=s.time-hit.at;
-    if(age<0||age>1.4)continue;
+    if(age<0||age>1.4||hit.kind==='wave')continue;
     live.add(hit.id);
     let node=impactNodes.get(hit.id);
     if(!node){
@@ -499,7 +499,8 @@ if(import.meta.env.DEV){
         g.state.obstacles=[];g.state.waves=[];g.nextChunk=g.nextWave=g.state.time+20;
         qaPaused=true;
       })],
-      ['Moving breaker',withGame(g=>{g.state.waves=[];g.spawnWave();for(let i=0;i<4;i++)g.update(.25,{});qaPaused=true;})],
+      ['Moving breaker',withGame(g=>{g.state.waves=[];g.spawnWave();for(let i=0;i<4;i++)g.update(.25,{});g.state.waves[0].z=g.state.boat.z+18;g.state.waves[0].x=g.state.boat.x+3;qaPaused=true;})],
+      ['Breaker hit',withGame(g=>{for(const p of g.state.players){p.state='deck';p.y=1.8;p.invulnerable=0;p.brace=false;}g.hitWave({strength:1.12,side:0});g.update(.2,{});qaPaused=true;})],
       ['Eat next snack',withGame(g=>{const p=g.state.players[0];p.snack=ADDON_IDS[snackIndex++%ADDON_IDS.length];g.useSnack(p);})],
       ['Stand at bow',withGame(g=>{for(const p of g.state.players){p.z=2.3;p.vz=0;}})],
       ['Stand at stern',withGame(g=>{for(const p of g.state.players){p.z=-2.3;p.vz=0;}})],

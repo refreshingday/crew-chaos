@@ -373,7 +373,7 @@ export class CrewRenderer {
         const mesh=this.mesh(root,foam?'sphere':wood?'box':'star',foam?C.white:wood?C.wood:n%2?C.gold:C.cream,[0,0,0],[1,1,1],foam?{}:{side:THREE.DoubleSide,emissive:wood?0x000000:0xffc769,emissiveIntensity:.3});
         mesh.castShadow=false;
         const angle=n*2.39996;
-        particles.push({mesh,foam,wood,dx:Math.cos(angle),dz:Math.sin(angle),lift:3.4+(n%5)*.62,speed:2+(n%4)*.75,spin:n*.83});
+        particles.push({mesh,geometry:mesh.geometry,material:mesh.material,foam,wood,dx:Math.cos(angle),dz:Math.sin(angle),lift:3.4+(n%5)*.62,speed:2+(n%4)*.75,spin:n*.83});
       }
       this.impactPool.push({root,rings,particles,ringMaterial,event:null});
     }
@@ -392,31 +392,35 @@ export class CrewRenderer {
       const slot=this.impactPool.find(item=>!item.event)||this.impactPool.reduce((a,b)=>a.event.at<b.event.at?a:b);
       slot.event=impact;slot.root.visible=true;
     }
-    let flash=0,shake=0;
+    let flash=0,waveFlash=0,shake=0;
     for(const slot of this.impactPool) {
       if(!slot.event)continue;
-      const impact=slot.event,age=Math.max(0,now-impact.at),life=impact.blocked?.85:1.15;
+      const impact=slot.event,wave=impact.kind==='wave',age=Math.max(0,now-impact.at),life=wave?1.25:impact.blocked?.85:1.15;
       if(age>life){slot.event=null;slot.root.visible=false;continue;}
       const progress=age/life,fade=1-progress;
       const water=this.waterHeight(impact.x,impact.z);
       slot.root.position.set(impact.x,water+.13,impact.z);
       slot.ringMaterial.opacity=fade*.88;
-      slot.ringMaterial.color.set(impact.blocked?0xc7baff:impact.kind==='thunder'?0xc8faff:0xf4ffed);
+      slot.ringMaterial.color.set(wave?0xc4ffff:impact.blocked?0xc7baff:impact.kind==='thunder'?0xc8faff:0xf4ffed);
       for(let i=0;i<2;i++){
-        const radius=this.reducedMotion?2.2+i*.8:.7+age*(impact.kind==='thunder'?15:6)+i*.65;
+        const radius=this.reducedMotion?2.2+i*.8:(wave?2.8:.7)+age*(impact.kind==='thunder'?15:wave?8:6)+i*.65;
         slot.rings[i].scale.set(radius,radius,.26);slot.rings[i].position.y=.06+i*.1;
       }
       for(const particle of slot.particles){
         const p=particle,mesh=p.mesh,movingAge=this.reducedMotion?.18:age;
-        mesh.visible=!(impact.blocked&&p.wood);
-        mesh.position.set(p.dx*p.speed*movingAge,(p.foam?.4:1.8)+p.lift*movingAge-5*movingAge*movingAge,p.dz*p.speed*movingAge);
-        const size=(p.foam?.35:.7)*(progress<.6?1:fade*2.5);
-        mesh.scale.set(size*(p.wood?.45:1),size*(p.wood?1.8:p.foam?1.4:1),size*(p.wood?.25:p.foam?.7:1));
+        mesh.geometry=wave?this.geo.sphere:p.geometry;
+        mesh.material=wave?this.mat(p.foam?0xedfff9:0x93edee,{roughness:.35}):p.material;
+        mesh.visible=wave||!(impact.blocked&&p.wood);
+        mesh.position.set(p.dx*(wave?2+p.speed*movingAge*1.6:p.speed*movingAge),(wave?1.1:p.foam?.4:1.8)+p.lift*movingAge*(wave?1.4:1)-5*movingAge*movingAge,p.dz*p.speed*movingAge*(wave?1.5:1));
+        const size=(wave?.2:p.foam?.35:.7)*(progress<.6?1:fade*2.5);
+        mesh.scale.set(size*(wave?1:p.wood?.45:1),size*(wave?2.2:p.wood?1.8:p.foam?1.4:1),size*(wave?1:p.wood?.25:p.foam?.7:1));
         mesh.rotation.set(p.spin+movingAge*2,movingAge*3,p.spin+movingAge*5);
       }
-      if(!impact.blocked){flash=Math.max(flash,Math.max(0,1-age/.28));shake=Math.max(shake,Math.max(0,1-age/.38)*(impact.damage||9)/15);}
+      if(wave){waveFlash=Math.max(waveFlash,Math.max(0,1-age/.32)*(impact.blocked?.4:1));shake=Math.max(shake,Math.max(0,1-age/.45)*(impact.blocked?.3:1.1));}
+      else if(!impact.blocked){flash=Math.max(flash,Math.max(0,1-age/.28));shake=Math.max(shake,Math.max(0,1-age/.38)*(impact.damage||9)/15);}
     }
     this.impactFlash=flash;
+    this.waveFlash=this.reducedMotion?0:waveFlash;
     this.impactShake=this.reducedMotion?0:shake*.23;
     this.impactShakeTime=t;
   }
@@ -589,25 +593,77 @@ export class CrewRenderer {
   makeWave() {
     const g=new THREE.Group();
     if(!this.geo.breaker){
-      const positions=[],indices=[],segments=22;
-      const profile=[[2.8,0],[1.7,.4],[.6,1.65],[-.15,2.28],[-.75,2.12],[-1.05,1.55],[-.8,.85]];
+      const positions=[],indices=[],colors=[],segments=64,steps=42;
+      // A closed, smooth water volume curls over an open pocket on its -Z face.
+      // X alone is normalized: width scaling cannot stretch the cross-section.
+      const profile=new THREE.CatmullRomCurve3([
+        [4.8,-3.2],[3.3,.2],[1.6,3.1],[.1,5.2],[-1.1,6.15],
+        [-2.25,5.9],[-2.95,4.8],[-2.7,3.75],[-2.25,4.15],
+        [-2.25,4.75],[-1.65,5.05],[-.95,4.15],[-.75,1.3],[-2.,-3.2],
+      ].map(([z,y])=>new THREE.Vector3(0,y,z)),true,'catmullrom',.25);
+      const back=new THREE.Color(0x023044),face=new THREE.Color(0x087f88),crest=new THREE.Color(0x86e7dc),color=new THREE.Color();
       for(let i=0;i<=segments;i++){
-        const u=i/segments,x=u-.5,taper=.23+.77*Math.pow(Math.sin(u*Math.PI),.42),arc=Math.pow(Math.abs(x)*2,2)*1.25;
-        for(const [z,y]of profile)positions.push(x,y*taper,z+arc);
+        const u=i/segments,x=u-.5,taper=Math.pow(Math.sin(u*Math.PI),.38)*(.93+.07*Math.sin(u*8)),arc=x*x*7;
+        for(let j=0;j<=steps;j++){
+          const p=profile.getPoint(j/steps),ripple=(Math.sin(u*26+j*.13)*.09+Math.sin(u*57)*.045)*taper;
+          positions.push(x,(p.y+ripple)*taper-.35,p.z*taper+arc);
+          color.copy(back).lerp(face,THREE.MathUtils.smoothstep(1.3-p.z,0,2.7));
+          color.lerp(crest,THREE.MathUtils.smoothstep(p.y+Math.sin(u*41)*.09,5.85,6.2)*.5);
+          colors.push(color.r,color.g,color.b);
+        }
       }
-      for(let i=0;i<segments;i++)for(let j=0;j<profile.length-1;j++){const a=i*profile.length+j,b=a+profile.length;indices.push(a,b,a+1,b,b+1,a+1);}
-      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();this.geo.breaker=geometry;
+      for(let i=0;i<segments;i++)for(let j=0;j<steps;j++){const a=i*(steps+1)+j,b=a+steps+1;indices.push(a,b,a+1,b,b+1,a+1);}
+      const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setIndex(indices);geometry.computeVertexNormals();this.geo.breaker=geometry;
+      // One continuous irregular foam lip, instead of scaled sphere sausages.
+      const lip=[],lipIndices=[],sides=8;
+      for(let i=0;i<=segments;i++){
+        const u=i/segments,x=u-.5,taper=Math.pow(Math.sin(u*Math.PI),.38)*(.93+.07*Math.sin(u*8)),arc=x*x*7,r=(.29+.065*Math.sin(u*71)) * taper;
+        for(let j=0;j<=sides;j++){const a=j/sides*TAU;lip.push(x,(5.65+Math.sin(u*26)*.09)*taper-.35+Math.cos(a)*r,(-2.55+Math.sin(a)*r)*taper+arc);}
+      }
+      for(let i=0;i<segments;i++)for(let j=0;j<sides;j++){const a=i*(sides+1)+j,b=a+sides+1;lipIndices.push(a,b,a+1,b,b+1,a+1);}
+      const lipGeo=new THREE.BufferGeometry();lipGeo.setAttribute('position',new THREE.Float32BufferAttribute(lip,3));lipGeo.setIndex(lipIndices);lipGeo.computeVertexNormals();this.geo.breakerLip=lipGeo;
+      const streaks=[],streakIndices=[];
+      for(let i=0;i<17;i++){
+        const u=.045+i*.056,x=u-.5,taper=Math.pow(Math.sin(u*Math.PI),.38)*(.93+.07*Math.sin(u*8)),arc=x*x*7;
+        const length=.65+(i%4)*.16,halfWidth=.004+(i%3)*.0015,base=streaks.length/3;
+        for(let j=0;j<5;j++){
+          const f=j/4,width=halfWidth*(1-f*.85),y=(5.65-f*length)*taper-.35,z=(-2.59-.55*Math.sin(f*Math.PI*.6))*taper+arc;
+          streaks.push(x-width+f*.006,y,z,x+width+f*.006,y,z);
+          if(j<4){const a=base+j*2;streakIndices.push(a,a+2,a+1,a+1,a+2,a+3);}
+        }
+      }
+      const streakGeo=new THREE.BufferGeometry();streakGeo.setAttribute('position',new THREE.Float32BufferAttribute(streaks,3));streakGeo.setIndex(streakIndices);streakGeo.computeVertexNormals();this.geo.breakerStreaks=streakGeo;
     }
-    this.mesh(g,'breaker',0x31b9c7,[0,0,0],[1,1,1],{side:THREE.DoubleSide,flatShading:true,roughness:.45}).castShadow=false;
-    const foam=new THREE.Group();g.add(foam);
-    for(let i=0;i<19;i++){
-      const u=i/18,x=u-.5,taper=.23+.77*Math.pow(Math.sin(u*Math.PI),.42),arc=Math.pow(Math.abs(x)*2,2)*1.25;
-      this.mesh(foam,'sphere',0xf2fff2,[x,2.16*taper,-.55+arc],[.039,.19*taper,.31]).castShadow=false;
-      this.mesh(foam,'sphere',0xb6f5e8,[x,1.22*taper,-1.1+arc],[.032,.2*taper,.16]).castShadow=false;
-      if(i%2===0){this.mesh(foam,'sphere',0xe3fff4,[x,.14,1.7+arc],[.034,.055,.38]).castShadow=false;this.mesh(foam,'sphere',0xd8fff0,[x+.015,2.58*taper,-.72+arc],[.012,.12,.09]).castShadow=false;}
-    }
-    this.batchStatic(g,[],false);
+    const body=this.mesh(g,'breaker',C.white,[0,0,0],[1,1,1],{vertexColors:true,side:THREE.DoubleSide,roughness:.48});body.castShadow=false;
+    const lip=this.mesh(g,'breakerLip',0xf2fff6,[0,0,0],[1,1,1],{roughness:.55});lip.castShadow=false;
+    const streaks=this.mesh(g,'breakerStreaks',0xe8fff4,[0,0,0],[1,1,1],{roughness:.55,side:THREE.DoubleSide});streaks.castShadow=false;
+    const spray=new THREE.InstancedMesh(this.geo.sphere,this.mat(0xe1fff8,{roughness:.4}),50);
+    spray.instanceMatrix.setUsage(THREE.DynamicDrawUsage);spray.frustumCulled=false;g.add(spray);
+    g.userData={body,lip,streaks,spray,transform:new THREE.Object3D()};
     this.world.add(g);return g;
+  }
+
+  animateWave(object,wave,t) {
+    const width=wave.width||22,phase=typeof wave.id==='number'?wave.id:String(wave.id).length;
+    const curl=this.reducedMotion?1:1+Math.sin(t*2.8+phase)*.025;
+    object.scale.set(width,wave.hit?.82:1,1);
+    object.userData.body.scale.y=curl;object.userData.lip.scale.y=curl;
+    object.userData.streaks.scale.y=curl;
+    const {spray,transform}=object.userData;
+    for(let i=0;i<32;i++){
+      const u=(i+.5)/32,x=u-.5,taper=Math.pow(Math.sin(u*Math.PI),.38)*(.93+.07*Math.sin(u*8)),arc=x*x*7;
+      const age=this.reducedMotion?.3:((t*.85+i*.618+phase*.13)%1);
+      transform.position.set(x+Math.sin(i*7)*age*.2/width,(5.7+age*1.8-age*age*4.8)*taper*curl-.35,(-2.6-age*1.5)*taper+arc);
+      const size=(.12+(i%3)*.04)*Math.sin(age*Math.PI)*taper;
+      transform.scale.set(size/width,size*(1+age*2),size);transform.rotation.x=-.3;transform.updateMatrix();spray.setMatrixAt(i,transform.matrix);
+    }
+    for(let i=0;i<18;i++){
+      const x=(i+.5)/18-.5,z=-2.5+x*x*7;
+      const worldX=object.position.x+x*width,worldZ=object.position.z+z;
+      transform.position.set(x,(this.waterHeight(worldX,worldZ)-object.position.y+.1)/object.scale.y,z);
+      transform.scale.set((.4+(i%3)*.12)/width,.055,.22+(i%2)*.12);transform.rotation.set(0,0,0);transform.updateMatrix();spray.setMatrixAt(i+32,transform.matrix);
+    }
+    spray.instanceMatrix.needsUpdate=true;
   }
 
   makeIslandArt(island,radius) {
@@ -678,16 +734,18 @@ export class CrewRenderer {
   }
 
   updateBoatEffects(boat,t) {
-    const effects=boat.effects||{},ghost=effects.ghost>0,flash=this.impactFlash||0;
+    const effects=boat.effects||{},ghost=effects.ghost>0,flash=this.impactFlash||0,waveFlash=this.waveFlash||0;
     for(const item of this.boatMaterials){
       const material=item.material;
       material.color.copy(item.color);
       if(ghost)material.color.lerp(CrewRenderer.GHOST_COLOR,.67);
       if(flash)material.color.lerp(CrewRenderer.FLASH_COLOR,flash*.3);
+      if(waveFlash)material.color.lerp(CrewRenderer.WAVE_FLASH_COLOR,waveFlash*.4);
       material.emissive.copy(item.emissive);
       if(ghost)material.emissive.lerp(CrewRenderer.GHOST_COLOR,.5);
       if(flash)material.emissive.lerp(CrewRenderer.FLASH_COLOR,flash*.4);
-      material.emissiveIntensity=item.emissiveIntensity+(ghost?.23:0)+flash*.35;
+      if(waveFlash)material.emissive.lerp(CrewRenderer.WAVE_FLASH_COLOR,waveFlash*.3);
+      material.emissiveIntensity=item.emissiveIntensity+(ghost?.23:0)+flash*.35+waveFlash*.28;
       if(material.transparent!==ghost){material.transparent=ghost;material.depthWrite=!ghost;material.needsUpdate=true;}
       material.opacity=ghost?.62:1;
     }
@@ -842,7 +900,7 @@ export class CrewRenderer {
       const wx=wave.x||0,wz=wave.z||0;
       object.position.set(wx,this.waterHeight(wx,wz)-.03,wz);
       object.rotation.set(0,0,0);
-      object.scale.set(wave.width||14,wave.hit?.68:1,1);
+      this.animateWave(object,wave,t);
     }
     for(const [id,object] of this.waveMeshes) if(!waveIds.has(id)) {this.removeObject(object);this.waveMeshes.delete(id);}
 
@@ -883,3 +941,4 @@ CrewRenderer.UP=new THREE.Vector3(0,1,0);
 CrewRenderer.ROPE_DIRECTION=new THREE.Vector3();
 CrewRenderer.GHOST_COLOR=new THREE.Color(0xc2d4ff);
 CrewRenderer.FLASH_COLOR=new THREE.Color(0xfff4cd);
+CrewRenderer.WAVE_FLASH_COLOR=new THREE.Color(0xa3f7ff);

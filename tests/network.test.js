@@ -148,13 +148,13 @@ test('disconnect updates every roster and host departure ends guest session', as
 test('missing room fails promptly and cleanup releases reservations', async () => using(2, async ([host, guest]) => {
   await assert.rejects(guest.join('ZZZZ'), /Room not found/);
   const room = await host.host();
-  assert.ok(MockPeer.registry.has('crew-chaos-web-v3-' + room));
+  assert.ok(MockPeer.registry.has('crew-chaos-web-v4-' + room));
   const s = host.session; host.leave();
   assert.equal(s.timers.size, 0); assert.equal(s.cancels.size, 0);
-  assert.ok(!MockPeer.registry.has('crew-chaos-web-v3-' + room));
+  assert.ok(!MockPeer.registry.has('crew-chaos-web-v4-' + room));
 }));
 
-test('v3 snapshots support open-ocean coordinates, moving waves, effects and bounded impacts', () => {
+test('v4 snapshots support open-ocean coordinates, moving waves, effects and bounded impacts', () => {
   const s = snapshot();
   s.boat.x = -15_000; s.boat.z = 50_000; s.boat.speed = 38.5;
   s.boat.trim = .8; s.boat.targetSpeed = 40; s.boat.speedTier = 3;
@@ -211,12 +211,12 @@ test('snapshot validation rejects malformed structures, non-finite numbers and o
   assert.equal(validSnapshot([]), false);
 });
 
-test('previous protocol packets cannot control or update a v3 room', async () => using(2, async ([host, guest]) => {
+test('previous protocol packets cannot control or update a v4 room', async () => using(2, async ([host, guest]) => {
   const room = await host.host(); await guest.join(room); host.startGame({}); await flush();
   let inputs = 0, updates = 0;
   host.addEventListener('input', () => inputs++); guest.addEventListener('snapshot', () => updates++);
-  guest.session.links.get('host').connection.send({ v: 2, type: 'input', run: 1, seq: 1, input: { x: 1 } });
-  [...host.session.links.values()][0].connection.send({ v: 2, type: 'snapshot', run: 1, seq: 1, state: snapshot() });
+  guest.session.links.get('host').connection.send({ v: 3, type: 'input', run: 1, seq: 1, input: { x: 1 } });
+  [...host.session.links.values()][0].connection.send({ v: 3, type: 'snapshot', run: 1, seq: 1, state: snapshot() });
   await flush(); assert.equal(inputs, 0); assert.equal(updates, 0);
 }));
 
@@ -329,3 +329,12 @@ test('actual island collision and automatic climbing snapshots reach a guest', a
   assert.equal(received[1].players.find(p => p.id === guest.localId).boarding, true);
   assert.equal(received[2].players.find(p => p.id === guest.localId).state, 'deck');
 }));
+
+
+test('wave impact feedback remains valid on guest snapshots', () => {
+  const s = snapshot();
+  s.impacts = [{id:123,x:0,z:1,at:s.time,damage:0,kind:'wave',blocked:false}];
+  assert.equal(validSnapshot(s),true);
+  s.impacts[0].blocked=true;
+  assert.equal(validSnapshot(s),true);
+});

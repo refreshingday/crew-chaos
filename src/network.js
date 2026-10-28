@@ -1,10 +1,9 @@
 // Room reservation and host-star topology adapted from refreshingday/multiplayerTest:
 // room-v23.js, network-v23.js, and puff-river/room.js (inspected 27 Oct 2026).
 // PeerJS Cloud provides signaling only. No dedicated gameplay server is used.
-// Islands are authoritative terrain in v3. Isolate cached older clients whose
-// renderers lack terrain and whose validators reject island collision impacts.
-const PREFIX = 'crew-chaos-web-v3-';
-export const NETWORK_PROTOCOL = 3;
+// v4 isolates older clients that cannot render or validate wave-hit feedback.
+const PREFIX = 'crew-chaos-web-v4-';
+export const NETWORK_PROTOCOL = 4;
 const PROTOCOL = NETWORK_PROTOCOL;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const COLORS = ['#ffb34d', '#56ded0', '#bd9cff', '#ff82aa'];
@@ -54,7 +53,7 @@ export function validSnapshot(state) {
     if (!finiteFields(state.stats, ['rescues', 'crates', 'treasure', 'falls', 'perfectBraces'])) return false;
     if (state.impacts !== undefined && (!Array.isArray(state.impacts) || state.impacts.length > 16 || !state.impacts.every(i =>
       finiteFields(i, ['x', 'z', 'at', 'damage']) && entityId(i.id) &&
-      ['crate', 'wreck', 'whale', 'reef', 'island', 'thunder'].includes(i.kind) && typeof i.blocked === 'boolean'))) return false;
+      ['crate', 'wreck', 'whale', 'reef', 'island', 'thunder', 'wave'].includes(i.kind) && typeof i.blocked === 'boolean'))) return false;
 
     // Optional fields and future cosmetic fields must still be finite, shallow JSON data.
     // This also rejects cyclic objects, undefined, typed arrays, and oversized nested payloads.
